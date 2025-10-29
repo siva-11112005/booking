@@ -4,12 +4,12 @@
   "description": "Physiotherapy appointment booking system",
   "main": "backend/server.js",
   "scripts": {
-    "start": "node backend/server.js",
-    "build": "npm run install-backend && npm run install-frontend && npm run build-frontend",
-    "install-backend": "cd backend && npm install",
-    "install-frontend": "cd frontend && npm install",
-    "build-frontend": "cd frontend && npm run build",
-    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm start\""
+  "start": "node backend/server.js",
+  "build": "npm run clean-install && npm run install-frontend && npm run build-frontend",
+  "clean-install": "cd backend && rm -rf node_modules package-lock.json && npm install",
+  "install-frontend": "cd frontend && npm install",
+  "build-frontend": "cd frontend && npm run build",
+  "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm start\""
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
