@@ -5,6 +5,8 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const OTP = require('../models/OTP');
 const { sendOTP } = require('../utils/smsService');
+
+const { sendOTP } = require('../utils/sms');  // Only one import!
 const { auth } = require('../middleware/auth');
 // Generate OTP
 const generateOTP = () => {
