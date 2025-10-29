@@ -1,20 +1,21 @@
-const { Vonage } = require('@vonage/server-sdk');
+// backend/utils/smsService.js
+const twilio = require('twilio');
 
-const vonage = new Vonage({
-  apiKey: process.env.VONAGE_API_KEY,
-  apiSecret: process.env.VONAGE_API_SECRET
-});
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 const sendSMS = async (to, text) => {
   try {
-    const from = process.env.VONAGE_FROM_NUMBER;
-    
+    const from = process.env.TWILIO_PHONE_NUMBER;
+
     console.log('📱 SMS Details:');
     console.log('   To:', to);
     console.log('   From:', from);
     console.log('   Message:', text);
-    
-    const result = await vonage.sms.send({ to, from, text });
+
+    await client.messages.create({ body: text, from, to });
     console.log('✅ SMS sent successfully');
     return true;
   } catch (error) {
@@ -26,7 +27,6 @@ const sendSMS = async (to, text) => {
 };
 
 const sendOTP = async (phone, otp) => {
-  // ALWAYS log OTP in production so you can see it
   console.log('');
   console.log('═'.repeat(60));
   console.log('🔐 OTP GENERATED:');
@@ -35,17 +35,15 @@ const sendOTP = async (phone, otp) => {
   console.log('   Valid for: 5 minutes');
   console.log('═'.repeat(60));
   console.log('');
-  
+
   const message = `Your OTP for Eswari Physiotherapy is: ${otp}. Valid for 5 minutes. Do not share this code.`;
-  
-  // Try to send SMS (might fail if Vonage not configured)
+
   const sent = await sendSMS(phone, message);
-  
+
   if (!sent) {
     console.log('⚠️  SMS failed, but OTP is logged above. Use it for testing.');
   }
-  
-  // Always return true so user can register
+
   return true;
 };
 
@@ -64,5 +62,5 @@ const sendCancellationNotice = async (phone) => {
 module.exports = {
   sendOTP,
   sendBookingConfirmation,
-  sendCancellationNotice
+  sendCancellationNotice,
 };
