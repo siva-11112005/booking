@@ -16,7 +16,25 @@ const AppointmentSchema = new mongoose.Schema({
   },
   painType: {
     type: String,
-    default: ''
+    default: 'Other'
+  },
+  consultationType: {
+    type: String,
+    enum: ['regular', 'followUp', 'emergency'],
+    default: 'regular'
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  paymentStatus: {
+    type: String,
+    enum: ['pending', 'paid', 'failed', 'refunded'],
+    default: 'pending'
+  },
+  paymentId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Payment'
   },
   reason: {
     type: String,
