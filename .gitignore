@@ -1,15 +1,7 @@
-<<<<<<< HEAD
+
 .env
 backend/.env
 frontend/.env
 *.env
 *.env.local
 *.env.production
-=======
-# Environment files
-.env
-backend/.env
-frontend/.env
-frontend/.env.production
-frontend/.env.local
->>>>>>> 3e440649dd090d3b989fcb11bf2cf763e7a78dd7
