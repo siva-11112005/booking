@@ -6,7 +6,7 @@ const Payment = require('../models/Payment');
 const Appointment = require('../models/Appointment');
 const { auth } = require('../middleware/auth');
 const notificationService = require('../utils/notificationService');
-
+const User = require('../models/User');
 // Initialize Razorpay
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,

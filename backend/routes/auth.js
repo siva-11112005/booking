@@ -5,9 +5,8 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const OTP = require('../models/OTP');
 const { auth } = require('../middleware/auth');
-const msg91Service = require('../utils/msg91Service');
-const emailService = require('../utils/emailService');
 const notificationService = require('../utils/notificationService');
+const emailService = require('../utils/emailService');
 
 // ============================================
 // HELPER FUNCTIONS
@@ -26,6 +25,7 @@ const validateIndianPhone = (phone) => {
 
 // Format phone number to +91 format
 const formatPhoneNumber = (phone) => {
+  if (!phone) return '';
   phone = phone.trim().replace(/\s/g, '');
   if (!phone.startsWith('+91')) {
     phone = phone.replace(/^0+/, ''); // Remove leading zeros
@@ -43,15 +43,22 @@ const validateEmail = (email) => {
 };
 
 // Check OTP limit per day
-const checkOTPLimit = async (phone) => {
+const checkOTPLimit = async (identifier) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
   
+  const query = {};
+  if (identifier.includes('@')) {
+    query.email = identifier;
+  } else {
+    query.phone = identifier;
+  }
+  
   const count = await OTP.countDocuments({
-    phone,
+    ...query,
     createdAt: { 
       $gte: today,
       $lt: tomorrow
@@ -63,58 +70,99 @@ const checkOTPLimit = async (phone) => {
 };
 
 // Clean expired OTPs
-const cleanExpiredOTPs = async (phone) => {
+const cleanExpiredOTPs = async (identifier) => {
+  const query = {};
+  if (identifier.includes('@')) {
+    query.email = identifier;
+  } else {
+    query.phone = identifier;
+  }
+  
   await OTP.deleteMany({
-    phone,
+    ...query,
     expiresAt: { $lt: new Date() }
   });
 };
 
 // ============================================
-// SEND OTP FOR REGISTRATION
+// SEND OTP FOR REGISTRATION (SMS or Email)
 // ============================================
 router.post('/send-otp', async (req, res) => {
   try {
-    let { phone } = req.body;
+    let { phone, email, preferEmail = false } = req.body;
     
-    // Validate input
-    if (!phone) {
+    // Must have either phone or email
+    if (!phone && !email) {
       return res.status(400).json({ 
-        message: 'Phone number is required' 
+        message: 'Phone number or email is required' 
       });
     }
     
-    // Format and validate phone number
-    phone = formatPhoneNumber(phone);
+    let identifier = '';
+    let formattedPhone = '';
+    let formattedEmail = '';
     
-    if (!validateIndianPhone(phone)) {
-      return res.status(400).json({ 
-        message: 'Please enter a valid 10-digit Indian mobile number' 
-      });
+    // If using phone
+    if (phone && !preferEmail) {
+      formattedPhone = formatPhoneNumber(phone);
+      identifier = formattedPhone;
+      
+      if (!validateIndianPhone(formattedPhone)) {
+        return res.status(400).json({ 
+          message: 'Please enter a valid 10-digit Indian mobile number' 
+        });
+      }
+      
+      // Check if phone already registered
+      const existingUser = await User.findOne({ phone: formattedPhone });
+      if (existingUser && existingUser.isVerified) {
+        return res.status(400).json({ 
+          message: 'This phone number is already registered. Please login instead.' 
+        });
+      }
+    }
+    
+    // If using email
+    if (email) {
+      formattedEmail = email.trim().toLowerCase();
+      
+      if (!validateEmail(formattedEmail)) {
+        return res.status(400).json({ 
+          message: 'Please enter a valid email address' 
+        });
+      }
+      
+      if (preferEmail) {
+        identifier = formattedEmail;
+        
+        // Check if email already registered
+        const existingUser = await User.findOne({ email: formattedEmail });
+        if (existingUser && existingUser.isVerified) {
+          return res.status(400).json({ 
+            message: 'This email is already registered. Please login instead.' 
+          });
+        }
+      }
     }
     
     // Clean expired OTPs
-    await cleanExpiredOTPs(phone);
+    await cleanExpiredOTPs(identifier);
     
     // Check daily OTP limit
-    const canSendOTP = await checkOTPLimit(phone);
+    const canSendOTP = await checkOTPLimit(identifier);
     if (!canSendOTP) {
       return res.status(429).json({ 
         message: `Maximum OTP limit reached for today (${process.env.MAX_OTP_PER_DAY || 5} OTPs). Please try again tomorrow.` 
       });
     }
     
-    // Check if phone already registered
-    const existingUser = await User.findOne({ phone });
-    if (existingUser && existingUser.isVerified) {
-      return res.status(400).json({ 
-        message: 'This phone number is already registered. Please login instead.' 
-      });
-    }
+    // Check for recent OTP (prevent spam)
+    const recentOTPQuery = {};
+    if (formattedPhone) recentOTPQuery.phone = formattedPhone;
+    if (formattedEmail && preferEmail) recentOTPQuery.email = formattedEmail;
     
-    // Check if there's a recent OTP (prevent spam)
     const recentOTP = await OTP.findOne({
-      phone,
+      ...recentOTPQuery,
       type: 'registration',
       createdAt: { $gt: new Date(Date.now() - 60000) } // Within last minute
     });
@@ -130,22 +178,38 @@ router.post('/send-otp', async (req, res) => {
     const expiresAt = new Date(Date.now() + (parseInt(process.env.OTP_VALIDITY_MINUTES) || 5) * 60000);
     
     // Save OTP to database
-    await OTP.create({
-      phone,
+    const otpData = {
       otp,
       type: 'registration',
-      expiresAt
-    });
+      expiresAt,
+      method: preferEmail ? 'email' : 'sms'
+    };
     
-    // Send OTP via MSG91
-    await msg91Service.sendOTP(phone, otp);
+    if (formattedPhone) otpData.phone = formattedPhone;
+    if (formattedEmail) otpData.email = formattedEmail;
     
-    console.log(`📱 OTP sent to ${phone}: ${otp}`);
+    await OTP.create(otpData);
+    
+    // Send OTP via notification service
+    const result = await notificationService.sendOTP(
+      formattedPhone, 
+      formattedEmail, 
+      'User', 
+      otp, 
+      preferEmail
+    );
+    
+    console.log(`🔐 OTP generated for ${identifier}: ${otp}`);
     
     res.json({ 
       success: true,
-      message: 'OTP sent successfully to your mobile number',
-      phone,
+      message: result.method === 'email' 
+        ? 'OTP sent successfully to your email' 
+        : result.method === 'sms'
+        ? 'OTP sent successfully to your mobile number'
+        : 'OTP generated (check console for development)',
+      method: result.method,
+      identifier: preferEmail ? formattedEmail : formattedPhone,
       expiryTime: process.env.OTP_VALIDITY_MINUTES || 5
     });
     
@@ -162,17 +226,24 @@ router.post('/send-otp', async (req, res) => {
 // ============================================
 router.post('/verify-otp', async (req, res) => {
   try {
-    let { phone, otp, name, password, email } = req.body;
+    let { phone, email, otp, name, password } = req.body;
     
     // Validate required fields
-    if (!phone || !otp || !name || !password) {
+    if (!otp || !name || !password) {
       return res.status(400).json({ 
-        message: 'Phone, OTP, name and password are required' 
+        message: 'OTP, name and password are required' 
       });
     }
     
-    // Format phone number
-    phone = formatPhoneNumber(phone);
+    if (!phone && !email) {
+      return res.status(400).json({ 
+        message: 'Phone or email is required' 
+      });
+    }
+    
+    // Format identifiers
+    const formattedPhone = phone ? formatPhoneNumber(phone) : null;
+    const formattedEmail = email ? email.trim().toLowerCase() : null;
     
     // Validate OTP format
     if (!/^\d{6}$/.test(otp)) {
@@ -196,39 +267,22 @@ router.post('/verify-otp', async (req, res) => {
       });
     }
     
-    // Validate email if provided
-    if (email) {
-      email = email.trim().toLowerCase();
-      if (!validateEmail(email)) {
-        return res.status(400).json({ 
-          message: 'Please enter a valid email address' 
-        });
-      }
-      
-      // Check if email already exists
-      const existingEmail = await User.findOne({ email });
-      if (existingEmail) {
-        return res.status(400).json({ 
-          message: 'This email is already registered with another account' 
-        });
-      }
-    }
-    
     // Find valid OTP
-    const otpRecord = await OTP.findOne({
-      phone,
+    const otpQuery = {
       otp,
       type: 'registration',
       expiresAt: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+    };
+    
+    if (formattedPhone) otpQuery.phone = formattedPhone;
+    if (formattedEmail) otpQuery.email = formattedEmail;
+    
+    const otpRecord = await OTP.findOne(otpQuery).sort({ createdAt: -1 });
     
     if (!otpRecord) {
       // Check if OTP exists but expired
-      const expiredOTP = await OTP.findOne({
-        phone,
-        otp,
-        type: 'registration'
-      });
+      delete otpQuery.expiresAt;
+      const expiredOTP = await OTP.findOne(otpQuery);
       
       if (expiredOTP) {
         return res.status(400).json({ 
@@ -242,50 +296,58 @@ router.post('/verify-otp', async (req, res) => {
     }
     
     // Check if user already exists
-    const existingUser = await User.findOne({ phone });
+    const existingUserQuery = { $or: [] };
+    if (formattedPhone) existingUserQuery.$or.push({ phone: formattedPhone });
+    if (formattedEmail) existingUserQuery.$or.push({ email: formattedEmail });
+    
+    const existingUser = await User.findOne(existingUserQuery);
     if (existingUser && existingUser.isVerified) {
       return res.status(400).json({ 
-        message: 'Phone number already registered. Please login.' 
+        message: 'Account already exists. Please login.' 
       });
     }
     
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    // Check if this is admin phone
-    const isAdmin = phone === process.env.ADMIN_PHONE;
+    // Check if this is admin
+    const isAdmin = formattedPhone === process.env.ADMIN_PHONE || formattedEmail === process.env.ADMIN_EMAIL;
     
     // Create user object
     const userData = {
       name,
-      phone,
       password: hashedPassword,
       isAdmin,
       isVerified: true,
       isBlocked: false
     };
     
+    // Add phone if provided
+    if (formattedPhone) {
+      userData.phone = formattedPhone;
+    }
+    
     // Add email if provided
-    if (email) {
-      userData.email = email;
+    if (formattedEmail) {
+      userData.email = formattedEmail;
     }
     
     // Create or update user
     let user;
     if (existingUser) {
       // Update existing unverified user
-      user = await User.findOneAndUpdate(
-        { phone },
-        userData,
-        { new: true }
-      );
+      Object.assign(existingUser, userData);
+      user = await existingUser.save();
     } else {
       // Create new user
       user = await User.create(userData);
     }
     
-    // Delete all OTPs for this phone
-    await OTP.deleteMany({ phone });
+    // Delete all OTPs for this user
+    const deleteQuery = {};
+    if (formattedPhone) deleteQuery.phone = formattedPhone;
+    if (formattedEmail) deleteQuery.email = formattedEmail;
+    await OTP.deleteMany(deleteQuery);
     
     // Generate JWT token
     const token = jwt.sign(
@@ -295,8 +357,8 @@ router.post('/verify-otp', async (req, res) => {
     );
     
     // Send welcome email if email provided
-    if (email) {
-      emailService.sendEmail(email, {
+    if (formattedEmail) {
+      emailService.sendEmail(formattedEmail, {
         subject: 'Welcome to Eswari Physiotherapy',
         html: `
           <h2>Welcome ${name}!</h2>
@@ -314,7 +376,7 @@ router.post('/verify-otp', async (req, res) => {
       user: {
         id: user._id,
         name: user.name,
-        phone: user.phone,
+        phone: user.phone || null,
         email: user.email || null,
         isAdmin: user.isAdmin
       }
@@ -423,7 +485,7 @@ router.post('/login', async (req, res) => {
       user: {
         id: user._id,
         name: user.name,
-        phone: user.phone,
+        phone: user.phone || null,
         email: user.email || null,
         isAdmin: user.isAdmin
       }
@@ -438,35 +500,62 @@ router.post('/login', async (req, res) => {
 });
 
 // ============================================
-// FORGOT PASSWORD - SEND OTP
+// FORGOT PASSWORD - SEND OTP (Email preferred)
 // ============================================
 router.post('/forgot-password', async (req, res) => {
   try {
-    let { phone } = req.body;
+    let { phone, email, preferEmail = true } = req.body; // Default to email for password reset
     
-    // Validate input
-    if (!phone) {
+    // Must have either phone or email
+    if (!phone && !email) {
       return res.status(400).json({ 
-        message: 'Phone number is required' 
+        message: 'Phone number or email is required' 
       });
     }
     
-    // Format phone number
-    phone = formatPhoneNumber(phone);
+    let user;
+    let identifier = '';
+    let formattedPhone = '';
+    let formattedEmail = '';
     
-    if (!validateIndianPhone(phone)) {
-      return res.status(400).json({ 
-        message: 'Please enter a valid Indian phone number' 
-      });
+    // Check by email first if provided
+    if (email) {
+      formattedEmail = email.trim().toLowerCase();
+      identifier = formattedEmail;
+      
+      if (!validateEmail(formattedEmail)) {
+        return res.status(400).json({ 
+          message: 'Please enter a valid email address' 
+        });
+      }
+      
+      user = await User.findOne({ email: formattedEmail });
+    }
+    
+    // If no email or user not found by email, check phone
+    if (!user && phone) {
+      formattedPhone = formatPhoneNumber(phone);
+      identifier = formattedPhone;
+      
+      if (!validateIndianPhone(formattedPhone)) {
+        return res.status(400).json({ 
+          message: 'Please enter a valid Indian phone number' 
+        });
+      }
+      
+      user = await User.findOne({ phone: formattedPhone });
     }
     
     // Check if user exists
-    const user = await User.findOne({ phone });
     if (!user) {
       return res.status(404).json({ 
-        message: 'No account found with this phone number' 
+        message: 'No account found with this phone number or email' 
       });
     }
+    
+    // Use user's actual email and phone
+    formattedEmail = user.email || formattedEmail;
+    formattedPhone = user.phone || formattedPhone;
     
     // Check if user is blocked
     if (user.isBlocked) {
@@ -476,10 +565,10 @@ router.post('/forgot-password', async (req, res) => {
     }
     
     // Clean expired OTPs
-    await cleanExpiredOTPs(phone);
+    await cleanExpiredOTPs(identifier);
     
     // Check OTP limit
-    const canSendOTP = await checkOTPLimit(phone);
+    const canSendOTP = await checkOTPLimit(identifier);
     if (!canSendOTP) {
       return res.status(429).json({ 
         message: `Maximum OTP limit reached for today. Please try again tomorrow.` 
@@ -487,8 +576,12 @@ router.post('/forgot-password', async (req, res) => {
     }
     
     // Check for recent OTP
+    const recentOTPQuery = {};
+    if (formattedPhone) recentOTPQuery.phone = formattedPhone;
+    if (formattedEmail) recentOTPQuery.email = formattedEmail;
+    
     const recentOTP = await OTP.findOne({
-      phone,
+      ...recentOTPQuery,
       type: 'password_reset',
       createdAt: { $gt: new Date(Date.now() - 60000) }
     });
@@ -504,22 +597,38 @@ router.post('/forgot-password', async (req, res) => {
     const expiresAt = new Date(Date.now() + (parseInt(process.env.OTP_VALIDITY_MINUTES) || 5) * 60000);
     
     // Save OTP
-    await OTP.create({
-      phone,
+    const otpData = {
       otp,
       type: 'password_reset',
-      expiresAt
-    });
+      expiresAt,
+      method: formattedEmail && preferEmail ? 'email' : 'sms'
+    };
     
-    // Send OTP via MSG91 and email
-    await notificationService.sendOTP(phone, user.email, user.name, otp);
+    if (formattedPhone) otpData.phone = formattedPhone;
+    if (formattedEmail) otpData.email = formattedEmail;
     
-    console.log(`🔐 Password reset OTP sent to ${phone}: ${otp}`);
+    await OTP.create(otpData);
+    
+    // Send OTP via notification service (prefer email for password reset)
+    const result = await notificationService.sendOTP(
+      formattedPhone, 
+      formattedEmail, 
+      user.name, 
+      otp, 
+      preferEmail && !!formattedEmail
+    );
+    
+    console.log(`🔐 Password reset OTP for ${identifier}: ${otp}`);
     
     res.json({ 
       success: true,
-      message: 'OTP sent successfully for password reset',
-      phone,
+      message: result.method === 'email'
+        ? 'OTP sent to your registered email'
+        : result.method === 'sms'
+        ? 'OTP sent to your registered phone number'
+        : 'OTP generated (check console)',
+      method: result.method,
+      identifier: result.method === 'email' ? formattedEmail : formattedPhone,
       expiryTime: process.env.OTP_VALIDITY_MINUTES || 5
     });
     
@@ -536,17 +645,24 @@ router.post('/forgot-password', async (req, res) => {
 // ============================================
 router.post('/reset-password', async (req, res) => {
   try {
-    let { phone, otp, newPassword } = req.body;
+    let { phone, email, otp, newPassword } = req.body;
     
     // Validate input
-    if (!phone || !otp || !newPassword) {
+    if (!otp || !newPassword) {
       return res.status(400).json({ 
-        message: 'Phone, OTP and new password are required' 
+        message: 'OTP and new password are required' 
       });
     }
     
-    // Format phone number
-    phone = formatPhoneNumber(phone);
+    if (!phone && !email) {
+      return res.status(400).json({ 
+        message: 'Phone or email is required' 
+      });
+    }
+    
+    // Format identifiers
+    const formattedPhone = phone ? formatPhoneNumber(phone) : null;
+    const formattedEmail = email ? email.trim().toLowerCase() : null;
     
     // Validate OTP format
     if (!/^\d{6}$/.test(otp)) {
@@ -563,20 +679,21 @@ router.post('/reset-password', async (req, res) => {
     }
     
     // Find valid OTP
-    const otpRecord = await OTP.findOne({
-      phone,
+    const otpQuery = {
       otp,
       type: 'password_reset',
       expiresAt: { $gt: new Date() }
-    }).sort({ createdAt: -1 });
+    };
+    
+    if (formattedPhone) otpQuery.phone = formattedPhone;
+    if (formattedEmail) otpQuery.email = formattedEmail;
+    
+    const otpRecord = await OTP.findOne(otpQuery).sort({ createdAt: -1 });
     
     if (!otpRecord) {
       // Check if OTP expired
-      const expiredOTP = await OTP.findOne({
-        phone,
-        otp,
-        type: 'password_reset'
-      });
+      delete otpQuery.expiresAt;
+      const expiredOTP = await OTP.findOne(otpQuery);
       
       if (expiredOTP) {
         return res.status(400).json({ 
@@ -590,7 +707,11 @@ router.post('/reset-password', async (req, res) => {
     }
     
     // Find user
-    const user = await User.findOne({ phone });
+    const userQuery = { $or: [] };
+    if (formattedPhone) userQuery.$or.push({ phone: formattedPhone });
+    if (formattedEmail) userQuery.$or.push({ email: formattedEmail });
+    
+    const user = await User.findOne(userQuery);
     if (!user) {
       return res.status(404).json({ 
         message: 'User not found' 
@@ -613,8 +734,11 @@ router.post('/reset-password', async (req, res) => {
     user.passwordChangedAt = new Date();
     await user.save();
     
-    // Delete all password reset OTPs for this phone
-    await OTP.deleteMany({ phone, type: 'password_reset' });
+    // Delete all password reset OTPs for this user
+    const deleteQuery = { type: 'password_reset' };
+    if (formattedPhone) deleteQuery.phone = formattedPhone;
+    if (formattedEmail) deleteQuery.email = formattedEmail;
+    await OTP.deleteMany(deleteQuery);
     
     // Send confirmation email if available
     if (user.email) {
@@ -648,21 +772,25 @@ router.post('/reset-password', async (req, res) => {
 // ============================================
 router.post('/resend-otp', async (req, res) => {
   try {
-    let { phone, type = 'registration' } = req.body;
+    let { phone, email, type = 'registration', preferEmail = false } = req.body;
     
-    if (!phone) {
+    if (!phone && !email) {
       return res.status(400).json({ 
-        message: 'Phone number is required' 
+        message: 'Phone number or email is required' 
       });
     }
     
-    // Format phone number
-    phone = formatPhoneNumber(phone);
+    // Format identifiers
+    const formattedPhone = phone ? formatPhoneNumber(phone) : null;
+    const formattedEmail = email ? email.trim().toLowerCase() : null;
     
     // Check for recent OTP
+    const recentOTPQuery = { type };
+    if (formattedPhone) recentOTPQuery.phone = formattedPhone;
+    if (formattedEmail) recentOTPQuery.email = formattedEmail;
+    
     const recentOTP = await OTP.findOne({
-      phone,
-      type,
+      ...recentOTPQuery,
       createdAt: { $gt: new Date(Date.now() - 60000) }
     });
     
@@ -673,7 +801,8 @@ router.post('/resend-otp', async (req, res) => {
     }
     
     // Check OTP limit
-    const canSendOTP = await checkOTPLimit(phone);
+    const identifier = preferEmail ? formattedEmail : (formattedPhone || formattedEmail);
+    const canSendOTP = await checkOTPLimit(identifier);
     if (!canSendOTP) {
       return res.status(429).json({ 
         message: 'Maximum OTP limit reached for today' 
@@ -685,22 +814,38 @@ router.post('/resend-otp', async (req, res) => {
     const expiresAt = new Date(Date.now() + (parseInt(process.env.OTP_VALIDITY_MINUTES) || 5) * 60000);
     
     // Save OTP
-    await OTP.create({
-      phone,
+    const otpData = {
       otp,
       type,
-      expiresAt
-    });
+      expiresAt,
+      method: preferEmail ? 'email' : 'sms'
+    };
+    
+    if (formattedPhone) otpData.phone = formattedPhone;
+    if (formattedEmail) otpData.email = formattedEmail;
+    
+    await OTP.create(otpData);
     
     // Send OTP
-    await msg91Service.sendOTP(phone, otp);
+    const result = await notificationService.sendOTP(
+      formattedPhone, 
+      formattedEmail, 
+      'User', 
+      otp, 
+      preferEmail
+    );
     
-    console.log(`📱 OTP resent to ${phone}: ${otp}`);
+    console.log(`📱 OTP resent to ${identifier}: ${otp}`);
     
     res.json({ 
       success: true,
-      message: 'OTP resent successfully',
-      phone,
+      message: result.method === 'email'
+        ? 'OTP resent to your email'
+        : result.method === 'sms'
+        ? 'OTP resent to your phone'
+        : 'OTP generated (check console)',
+      method: result.method,
+      identifier,
       expiryTime: process.env.OTP_VALIDITY_MINUTES || 5
     });
     
@@ -722,7 +867,7 @@ router.get('/me', auth, async (req, res) => {
       user: {
         id: req.user._id,
         name: req.user.name,
-        phone: req.user.phone,
+        phone: req.user.phone || null,
         email: req.user.email || null,
         isAdmin: req.user.isAdmin,
         isVerified: req.user.isVerified,
@@ -742,7 +887,7 @@ router.get('/me', auth, async (req, res) => {
 // ============================================
 router.put('/update-profile', auth, async (req, res) => {
   try {
-    const { name, email } = req.body;
+    const { name, email, phone } = req.body;
     const userId = req.user._id;
     
     const updates = {};
@@ -787,6 +932,40 @@ router.put('/update-profile', auth, async (req, res) => {
       }
     }
     
+    // Update phone if provided
+    if (phone !== undefined) {
+      if (phone === '') {
+        // Don't allow removing phone if it's the only identifier
+        if (!req.user.email && !email) {
+          return res.status(400).json({ 
+            message: 'Cannot remove phone number without an email address' 
+          });
+        }
+        updates.phone = null;
+      } else {
+        const formattedPhone = formatPhoneNumber(phone);
+        if (!validateIndianPhone(formattedPhone)) {
+          return res.status(400).json({ 
+            message: 'Please enter a valid phone number' 
+          });
+        }
+        
+        // Check if phone already exists
+        const existingPhone = await User.findOne({ 
+          phone: formattedPhone,
+          _id: { $ne: userId }
+        });
+        
+        if (existingPhone) {
+          return res.status(400).json({ 
+            message: 'This phone number is already registered' 
+          });
+        }
+        
+        updates.phone = formattedPhone;
+      }
+    }
+    
     // Update user
     const updatedUser = await User.findByIdAndUpdate(
       userId,
@@ -800,7 +979,7 @@ router.put('/update-profile', auth, async (req, res) => {
       user: {
         id: updatedUser._id,
         name: updatedUser.name,
-        phone: updatedUser.phone,
+        phone: updatedUser.phone || null,
         email: updatedUser.email || null,
         isAdmin: updatedUser.isAdmin
       }

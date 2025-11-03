@@ -14,7 +14,7 @@ const PaymentSchema = new mongoose.Schema({
   orderId: {
     type: String,
     required: true,
-    unique: true
+    unique: true  // This already creates an index
   },
   razorpayPaymentId: String,
   razorpayOrderId: String,
@@ -50,7 +50,8 @@ const PaymentSchema = new mongoose.Schema({
 
 // Index for faster queries
 PaymentSchema.index({ user: 1, appointment: 1 });
-PaymentSchema.index({ orderId: 1 });
+// Remove this line as orderId already has unique: true
+// PaymentSchema.index({ orderId: 1 }); 
 PaymentSchema.index({ status: 1 });
 
 module.exports = mongoose.model('Payment', PaymentSchema);

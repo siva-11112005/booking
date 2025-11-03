@@ -96,7 +96,8 @@ app.get('/ping', (req, res) => {
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/appointments', require('./routes/appointments'));
 app.use('/api/admin', require('./routes/admin'));
-
+// In server.js, add this line with other routes:
+app.use('/api/payment', require('./routes/payment'));
 // ============================================
 // PRODUCTION: SERVE REACT BUILD
 // ============================================

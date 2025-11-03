@@ -1,42 +1,18 @@
 export const PRICING = {
   consultation: {
-    regular: 5,
-    followUp: 3,
-    emergency: 8
+    regular: 1,
+    followUp: 1,
+    emergency: 1
   },
   
   treatments: {
-    'Back Pain': 6,
-    'Neck Pain': 5,
-    'Knee Pain': 6,
-    'Shoulder Pain': 6,
-    'Sports Injury': 7,
-    'Other': 5
+    'Back Pain': 1,
+    'Neck Pain': 1,
+    'Knee Pain': 1,
+    'Shoulder Pain': 1,
+    'Sports Injury': 1,
+    'Other': 1
   },
-  
-  packages: [
-    {
-      id: 'package5',
-      sessions: 5,
-      price: 2250,
-      discount: 10,
-      perSession: 450
-    },
-    {
-      id: 'package10',
-      sessions: 10,
-      price: 4250,
-      discount: 15,
-      perSession: 425
-    },
-    {
-      id: 'package20',
-      sessions: 20,
-      price: 8000,
-      discount: 20,
-      perSession: 400
-    }
-  ],
   
   currency: 'INR',
   symbol: '₹',

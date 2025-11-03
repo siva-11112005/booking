@@ -25,11 +25,17 @@ const AppointmentSchema = new mongoose.Schema({
   },
   amount: {
     type: Number,
-    required: true
+    required: true,
+    default: 1
   },
   paymentStatus: {
     type: String,
     enum: ['pending', 'paid', 'failed', 'refunded'],
+    default: 'pending'
+  },
+  paymentMethod: {
+    type: String,
+    enum: ['online', 'clinic', 'cash', 'pending'],
     default: 'pending'
   },
   paymentId: {
@@ -49,6 +55,12 @@ const AppointmentSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  cancelledAt: Date,
+  cancelledBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  rescheduledAt: Date,
   createdAt: {
     type: Date,
     default: Date.now
@@ -56,6 +68,6 @@ const AppointmentSchema = new mongoose.Schema({
 });
 
 // Compound index to prevent double booking
-AppointmentSchema.index({ date: 1, timeSlot: 1 }, { unique: true });
+AppointmentSchema.index({ date: 1, timeSlot: 1 });
 
 module.exports = mongoose.model('Appointment', AppointmentSchema);

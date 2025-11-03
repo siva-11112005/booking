@@ -14,7 +14,7 @@ root.render(
 );
 
 // Register service worker for PWA
-serviceWorkerRegistration.register();
+serviceWorkerRegistration.unregister();
 
 // Report web vitals
 reportWebVitals();

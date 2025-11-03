@@ -1,292 +1,348 @@
 import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import { getAvailableSlots, bookAppointment } from '../services/api';
 import { AuthContext } from '../context/AuthContext';
-import { getConsultationFee, formatAmount, PRICING } from '../config/pricing';
 import Navbar from '../components/Navbar';
 import Payment from '../components/Payment';
 
 const BookAppointment = () => {
-  const { user } = useContext(AuthContext);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { t } = useTranslation();
-  
-  const [selectedDate, setSelectedDate] = useState(
-    location.state?.date || new Date().toISOString().split('T')[0]
-  );
-  const [selectedSlot, setSelectedSlot] = useState(location.state?.time || null);
-  const [slots, setSlots] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
-  const [currentAppointment, setCurrentAppointment] = useState(null);
-  
-  const [bookingForm, setBookingForm] = useState({
-    painType: 'Other',
-    consultationType: 'regular',
-    phone: '',
-    email: '',
-    reason: ''
-  });
+console.log('BookAppointment CLEAN v3'); // sanity log
+const { user } = useContext(AuthContext);
+const navigate = useNavigate();
+const location = useLocation();
 
-  const [selectedAmount, setSelectedAmount] = useState(500);
+const [selectedDate, setSelectedDate] = useState(
+location.state?.date || new Date().toISOString().split('T')[0]
+);
+const [selectedSlot, setSelectedSlot] = useState(location.state?.time || null);
+const [slots, setSlots] = useState([]);
+const [loading, setLoading] = useState(false);
+const [error, setError] = useState('');
+const [showModal, setShowModal] = useState(false);
+const [showPayment, setShowPayment] = useState(false);
+const [currentAppointment, setCurrentAppointment] = useState(null);
 
-  useEffect(() => {
-    if (selectedDate) {
-      fetchSlots();
-    }
-  }, [selectedDate]);
+const [bookingForm, setBookingForm] = useState({
+painType: 'Other',
+consultationType: 'regular',
+phone: user?.phone || '',
+email: user?.email || '',
+reason: ''
+});
 
-  useEffect(() => {
-    if (location.state?.time) {
-      setShowModal(true);
-    }
-  }, [location.state]);
+// Dev mode: always ₹1
+const [selectedAmount] = useState(1);
 
-  // Update amount when pain type or consultation type changes
-  useEffect(() => {
-    const amount = getConsultationFee(
-      bookingForm.painType,
-      bookingForm.consultationType
-    );
-    setSelectedAmount(amount);
-  }, [bookingForm.painType, bookingForm.consultationType]);
+const fetchSlots = useCallback(async () => {
+if (!selectedDate) return;
+try {
+setLoading(true);
+setError('');
+const response = await getAvailableSlots(selectedDate);
+setSlots(response.data.slots);
+} catch (err) {
+setError('Failed to fetch slots');
+} finally {
+setLoading(false);
+}
+}, [selectedDate]);
 
-  const fetchSlots = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await getAvailableSlots(selectedDate);
-      setSlots(response.data.slots);
-    } catch (err) {
-      setError('Failed to fetch slots');
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedDate]);
+useEffect(() => { fetchSlots(); }, [fetchSlots]);
+useEffect(() => { if (location.state?.time) setShowModal(true); }, [location.state]);
 
-  const handleSlotClick = (slot) => {
-    if (!slot.isBooked && !slot.time.includes('01:00 PM')) {
-      setSelectedSlot(slot.time);
-      setShowModal(true);
-    }
-  };
+const getMaxDate = () => {
+const maxDate = new Date();
+maxDate.setDate(maxDate.getDate() + 7);
+return maxDate.toISOString().split('T')[0];
+};
 
-  const handleBooking = async (e) => {
-    e.preventDefault();
-    try {
-      setLoading(true);
-      setError('');
-      
-      const response = await bookAppointment({
-        date: selectedDate,
-        timeSlot: selectedSlot,
-        painType: bookingForm.painType,
-        consultationType: bookingForm.consultationType,
-        phone: bookingForm.phone || user.phone,
-        email: bookingForm.email || user.email,
-        reason: bookingForm.reason
-      });
+const handleSlotClick = (slot) => {
+const isLunch = slot.time.includes('01:00 PM');
+if (!slot.isBooked && !isLunch) {
+setSelectedSlot(slot.time);
+setShowModal(true);
+}
+};
 
-      setCurrentAppointment(response.data.appointment);
-      setShowModal(false);
-      
-      // Show payment option
-      setShowPayment(true);
-      
-    } catch (err) {
-      setError(err.response?.data?.message || 'Booking failed');
-    } finally {
-      setLoading(false);
-    }
-  };
+const handleBooking = async (e) => {
+e.preventDefault();
+try {
+setLoading(true);
+setError('');
+const response = await bookAppointment({
+date: selectedDate,
+timeSlot: selectedSlot,
+painType: bookingForm.painType,
+consultationType: bookingForm.consultationType,
+phone: bookingForm.phone || user.phone,
+email: bookingForm.email || user.email,
+reason: bookingForm.reason
+});
+setCurrentAppointment(response.data.appointment);
+setShowModal(false);
+setShowPayment(true);
+} catch (err) {
+setError(err.response?.data?.message || 'Booking failed');
+} finally {
+setLoading(false);
+}
+};
 
-  const handlePaymentSuccess = (payment) => {
-    alert('Payment successful! Appointment confirmed.');
-    navigate('/my-appointments');
-  };
+const handlePaymentSuccess = (payment) => {
+alert('✅ Appointment confirmed! Payment method: ' + (payment.method || 'clinic'));
+navigate('/my-appointments');
+};
 
-  const handlePaymentSkip = () => {
-    alert('Appointment booked! Please pay at the clinic.');
-    navigate('/my-appointments');
-  };
+const handlePaymentSkip = () => {
+setShowPayment(false);
+setCurrentAppointment(null);
+setSelectedSlot(null);
+fetchSlots();
+};
 
-  const painTypes = Object.keys(PRICING.treatments);
+const handleCloseModal = () => {
+setShowModal(false);
+setSelectedSlot(null);
+setError('');
+};
 
-  return (
-    <>
-      <Navbar />
-      <div className="booking-section">
-        <div className="booking-card">
-          <h2 className="booking-title">
-            {t('booking.title')}
+const painTypes = ['Back Pain', 'Neck Pain', 'Knee Pain', 'Shoulder Pain', 'Sports Injury', 'Other'];
+
+const selectedDateObj = new Date(selectedDate + 'T00:00:00');
+const isSunday = selectedDateObj.getDay() === 0;
+
+const morningSlots = slots.filter(slot => {
+const hour = parseInt(slot.time.split(':')[0], 10);
+return hour >= 10 && hour <= 12;
+});
+
+const afternoonSlots = slots.filter(slot => slot.time.includes('PM') && !slot.time.includes('01:00 PM'));
+
+return (
+<>
+<Navbar />
+<div className="booking-section">
+<div className="booking-card">
+{/* Header */}
+<div style={{
+background: 'linear-gradient(135deg, #e67e22 0%, #d35400 100%)',
+color: 'white',
+padding: '40px',
+borderRadius: '20px 20px 0 0',
+margin: '-60px -50px 40px -50px',
+textAlign: 'center'
+}}>
+<h1 style={{ fontSize: '2.2em', marginBottom: '8px', fontWeight: '700' }}>
+Book Your Appointment
+</h1>
+<p style={{ fontSize: '1.05em', opacity: 0.95 }}>
+Select date → choose time → confirm booking
+</p>
+</div>
+{error && <div className="alert alert-error">{error}</div>}
+
+      {/* Step 1: Date */}
+      <div style={{
+        background: '#f8f9fa',
+        padding: '24px',
+        borderRadius: '12px',
+        marginBottom: '24px',
+        border: '1px solid #eee'
+      }}>
+        <h2 style={{
+          color: '#333', marginBottom: '16px', fontSize: '1.2em',
+          display: 'flex', alignItems: 'center', gap: '8px'
+        }}>
+          <span>📅</span> Select Date
+        </h2>
+        <div className="date-selector">
+          <input 
+            type="date" 
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            min={new Date().toISOString().split('T')[0]}
+            max={getMaxDate()}
+            style={{
+              width: '100%', padding: '12px 16px', fontSize: '1.05em',
+              border: '2px solid #e67e22', borderRadius: '10px', cursor: 'pointer'
+            }}
+          />
+          <div style={{ marginTop: '12px', fontSize: '1.05em', color: '#e67e22', fontWeight: 600, textAlign: 'center' }}>
+            {selectedDateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          </div>
+        </div>
+      </div>
+
+      {/* Step 2: Time Slots */}
+      {!loading && !isSunday && slots.length > 0 && (
+        <div style={{ background: 'white', padding: '24px', borderRadius: '12px', border: '1px solid #eee' }}>
+          <h2 style={{
+            color: '#333', marginBottom: '16px', fontSize: '1.2em',
+            display: 'flex', alignItems: 'center', gap: '8px'
+          }}>
+            <span>⏰</span> Choose Time Slot
           </h2>
 
-          {/* Pricing Display */}
-          <div className="pricing-info" style={{
-            background: '#fff3cd',
-            padding: '20px',
-            borderRadius: '12px',
-            marginBottom: '30px'
-          }}>
-            <h3 style={{ marginBottom: '15px', color: '#856404' }}>
-              💰 Consultation Fees
-            </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
-              {Object.entries(PRICING.treatments).map(([type, price]) => (
-                <div key={type} style={{ 
-                  background: 'white',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  border: '2px solid #ffc107'
-                }}>
-                  <strong>{type}:</strong> {formatAmount(price)}
-                </div>
-              ))}
+          {morningSlots.length > 0 && (
+            <div style={{ marginBottom: '24px' }}>
+              <h3 style={{ color: '#666', marginBottom: '10px', fontSize: '1em', borderBottom: '1px solid #f0f0f0', paddingBottom: '8px' }}>
+                🌅 Morning (10:00 AM - 1:00 PM)
+              </h3>
+              <div className="slots-grid">
+                {morningSlots.map((slot, index) => {
+                  const isLunch = slot.time.includes('01:00 PM');
+                  return (
+                    <div 
+                      key={index}
+                      className={`slot-card ${isLunch ? 'lunch' : slot.isBooked ? 'booked' : 'available'}`}
+                      onClick={() => handleSlotClick(slot)}
+                      style={{ cursor: (!slot.isBooked && !isLunch) ? 'pointer' : 'not-allowed' }}
+                    >
+                      <div className="slot-icon">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10" />
+                          <polyline points="12 6 12 12 16 14" />
+                        </svg>
+                      </div>
+                      <div className="slot-time">{slot.time}</div>
+                      <div className="slot-status">
+                        {isLunch ? 'Lunch Break' : slot.isBooked ? '🔴 BOOKED' : '✅ AVAILABLE'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-            
-            {/* Package Offers */}
-            <div style={{ marginTop: '20px' }}>
-              <h4 style={{ color: '#856404', marginBottom: '10px' }}>
-                🎁 Package Offers (Save up to 20%)
-              </h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
-                {PRICING.packages.map(pkg => (
-                  <div key={pkg.id} style={{
-                    background: 'white',
-                    padding: '15px',
-                    borderRadius: '8px',
-                    border: '2px solid #28a745',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '1.2em', fontWeight: 'bold', color: '#28a745' }}>
-                      {pkg.sessions} Sessions
+          )}
+
+          {/* Lunch */}
+          <div style={{ background: '#fff3cd', padding: '10px', borderRadius: '8px', marginBottom: '24px', textAlign: 'center', color: '#856404' }}>
+            🍽️ Lunch Break: 1:00 PM - 2:00 PM
+          </div>
+
+          {afternoonSlots.length > 0 && (
+            <div>
+              <h3 style={{ color: '#666', marginBottom: '10px', fontSize: '1em', borderBottom: '1px solid #f0f0f0', paddingBottom: '8px' }}>
+                ☀️ Afternoon (2:00 PM - 5:00 PM)
+              </h3>
+              <div className="slots-grid">
+                {afternoonSlots.map((slot, index) => (
+                  <div 
+                    key={index}
+                    className={`slot-card ${slot.isBooked ? 'booked' : 'available'}`}
+                    onClick={() => handleSlotClick(slot)}
+                    style={{ cursor: !slot.isBooked ? 'pointer' : 'not-allowed' }}
+                  >
+                    <div className="slot-icon">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
                     </div>
-                    <div style={{ fontSize: '1.4em', fontWeight: 'bold', margin: '10px 0' }}>
-                      {formatAmount(pkg.price)}
-                    </div>
-                    <div style={{ color: '#dc3545', fontWeight: 'bold' }}>
-                      Save {pkg.discount}%
-                    </div>
-                    <div style={{ fontSize: '0.9em', color: '#666', marginTop: '5px' }}>
-                      {formatAmount(pkg.perSession)}/session
+                    <div className="slot-time">{slot.time}</div>
+                    <div className="slot-status">
+                      {slot.isBooked ? '🔴 BOOKED' : '✅ AVAILABLE'}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-          </div>
-
-          {/* Rest of your booking component */}
-          {/* Date selector, slots, etc. */}
-          
-        </div>
-      </div>
-
-      {/* Booking Modal */}
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2 className="modal-title">{t('booking.confirmBooking')}</h2>
-
-            {error && <div className="alert alert-error">{error}</div>}
-
-            <div className="booking-summary">
-              <div><strong>{t('appointments.date')}:</strong> {selectedDate}</div>
-              <div><strong>{t('appointments.time')}:</strong> {selectedSlot}</div>
-              <div><strong>{t('booking.duration')}:</strong> 50 minutes</div>
-              <div style={{ 
-                fontSize: '1.3em', 
-                color: '#e67e22', 
-                fontWeight: 'bold',
-                marginTop: '10px'
-              }}>
-                <strong>{t('booking.consultationFee')}:</strong> {formatAmount(selectedAmount)}
-              </div>
-            </div>
-
-            <form onSubmit={handleBooking}>
-              <div className="form-group">
-                <label>{t('booking.selectPainType')} *</label>
-                <select 
-                  value={bookingForm.painType}
-                  onChange={(e) => setBookingForm({...bookingForm, painType: e.target.value})}
-                  required
-                >
-                  {painTypes.map((pain, idx) => (
-                    <option key={idx} value={pain}>
-                      {pain} - {formatAmount(PRICING.treatments[pain])}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label>Consultation Type *</label>
-                <select 
-                  value={bookingForm.consultationType}
-                  onChange={(e) => setBookingForm({...bookingForm, consultationType: e.target.value})}
-                  required
-                >
-                  <option value="regular">
-                    Regular - {formatAmount(PRICING.consultation.regular)}
-                  </option>
-                  <option value="followUp">
-                    Follow-up - {formatAmount(PRICING.consultation.followUp)}
-                  </option>
-                  <option value="emergency">
-                    Emergency - {formatAmount(PRICING.consultation.emergency)}
-                  </option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label>{t('booking.describeCondition')}</label>
-                <textarea
-                  value={bookingForm.reason}
-                  onChange={(e) => setBookingForm({...bookingForm, reason: e.target.value})}
-                  placeholder="Describe your symptoms..."
-                />
-              </div>
-
-              <div className="modal-actions">
-                <button 
-                  type="button" 
-                  onClick={() => setShowModal(false)}
-                  className="btn-modal btn-modal-cancel"
-                >
-                  {t('common.cancel')}
-                </button>
-                <button 
-                  type="submit"
-                  className="btn-modal btn-modal-submit"
-                  disabled={loading}
-                >
-                  {loading ? 'Booking...' : t('booking.confirmBooking')}
-                </button>
-              </div>
-            </form>
-          </div>
+          )}
         </div>
       )}
 
-      {/* Payment Modal */}
-      {showPayment && currentAppointment && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <Payment 
-              appointment={currentAppointment}
-              amount={selectedAmount}
-              onSuccess={handlePaymentSuccess}
-              onCancel={handlePaymentSkip}
+      {loading && !showPayment && (
+        <div style={{ textAlign: 'center', padding: '60px', fontSize: '1.1em', color: '#e67e22' }}>
+          Loading available slots...
+        </div>
+      )}
+
+      {!loading && isSunday && (
+        <div className="closed-message">Clinic is closed on Sundays</div>
+      )}
+    </div>
+  </div>
+
+  {/* Booking Modal */}
+  {showModal && (
+    <div className="modal-overlay" onClick={handleCloseModal}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <h2 className="modal-title">Confirm Booking</h2>
+        {error && <div className="alert alert-error">{error}</div>}
+        <div className="booking-summary">
+          <div><strong>Date:</strong> {selectedDate}</div>
+          <div><strong>Time:</strong> {selectedSlot}</div>
+          <div><strong>Duration:</strong> 50 minutes</div>
+          <div style={{ fontSize: '1.2em', color: '#e67e22', fontWeight: 'bold', marginTop: '8px' }}>
+            <strong>Fee:</strong> ₹{selectedAmount}
+          </div>
+        </div>
+
+        <form onSubmit={handleBooking}>
+          <div className="form-group">
+            <label>Select Pain Type *</label>
+            <select 
+              value={bookingForm.painType}
+              onChange={(e) => setBookingForm({...bookingForm, painType: e.target.value})}
+              required
+            >
+              {['Back Pain','Neck Pain','Knee Pain','Shoulder Pain','Sports Injury','Other'].map((p, i) => (
+                <option key={i} value={p}>{p}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label>Consultation Type *</label>
+            <select 
+              value={bookingForm.consultationType}
+              onChange={(e) => setBookingForm({...bookingForm, consultationType: e.target.value})}
+              required
+            >
+              <option value="regular">Regular</option>
+              <option value="followUp">Follow-up</option>
+              <option value="emergency">Emergency</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label>Describe Your Condition (optional)</label>
+            <textarea
+              value={bookingForm.reason}
+              onChange={(e) => setBookingForm({...bookingForm, reason: e.target.value})}
+              placeholder="Describe your symptoms..."
+              rows="4"
             />
           </div>
-        </div>
-      )}
-    </>
-  );
+
+          <div className="modal-actions">
+            <button type="button" onClick={handleCloseModal} className="btn-modal btn-modal-cancel">
+              Cancel
+            </button>
+            <button type="submit" className="btn-modal btn-modal-submit" disabled={loading}>
+              {loading ? 'Booking...' : 'Confirm Booking'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )}
+
+  {/* Payment Modal */}
+  {showPayment && currentAppointment && (
+    <div className="modal-overlay">
+      <div className="modal-content">
+        <Payment 
+          appointment={currentAppointment}
+          amount={selectedAmount}
+          onSuccess={handlePaymentSuccess}
+          onCancel={handlePaymentSkip}
+        />
+      </div>
+    </div>
+  )}
+</>
+);
 };
 
 export default BookAppointment;

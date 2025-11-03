@@ -10,7 +10,9 @@ import MyAppointments from './pages/MyAppointments';
 import AdminDashboard from './pages/AdminDashboard';
 import PrivateRoute from './components/PrivateRoute';
 import AdminRoute from './components/AdminRoute';
+import InstallPrompt from './components/InstallPrompt';
 import './App.css';
+import './i18n/config'; // Import i18n configuration
 
 function App() {
   return (
@@ -29,6 +31,9 @@ function App() {
           
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
+        
+        {/* PWA Install Prompt */}
+        <InstallPrompt />
       </Router>
     </AuthProvider>
   );
