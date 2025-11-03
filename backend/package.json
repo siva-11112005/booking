@@ -4,7 +4,7 @@
   "description": "Backend for Eswari Physiotherapy",
   "main": "server.js",
   "scripts": {
-    "render-build": "cd ../frontend && npm ci && npm run build && cd ../backend && npm ci",
+    "render-build": "cd ../frontend && npm ci --legacy-peer-deps && npm run build && cd ../backend && npm ci",
     "start": "node server.js",
     "dev": "nodemon server.js"
   },
