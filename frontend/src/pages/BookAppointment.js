@@ -110,6 +110,7 @@ const painTypes = ['Back Pain', 'Neck Pain', 'Knee Pain', 'Shoulder Pain', 'Spor
 
 const selectedDateObj = new Date(selectedDate + 'T00:00:00');
 const isSunday = selectedDateObj.getDay() === 0;
+const isToday = selectedDateObj.toDateString() === new Date().toDateString();
 
 const morningSlots = slots.filter(slot => {
 const hour = parseInt(slot.time.split(':')[0], 10);

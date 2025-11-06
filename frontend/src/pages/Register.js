@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { AuthContext } from '../context/AuthContext';
 import { sendOTP, verifyOTP } from '../services/api';
 
 const Register = () => {
@@ -18,6 +19,7 @@ const Register = () => {
   const [otpSent, setOtpSent] = useState(false);
   const [otpTimer, setOtpTimer] = useState(0);
   const navigate = useNavigate();
+  const { loginUser } = useContext(AuthContext);
 
   useEffect(() => {
     if (otpTimer > 0) {
@@ -148,17 +150,17 @@ const handleSendOTP = async (preferEmail = false) => {
 
       const response = await verifyOTP(registrationData);
 
-      // Store auth token and user data
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      
-      setSuccess('Registration successful! Logging you in...');
-      
-      // Trigger auto-login by dispatching user data to auth context
-      if (onLoginSuccess) {
-        onLoginSuccess(response.data);
+      // Use AuthContext to set logged-in user and token
+      try {
+        loginUser(response.data.token, response.data.user);
+      } catch (e) {
+        // fallback to localStorage if context call fails
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
       }
-      
+
+      setSuccess('Registration successful! Logging you in...');
+
       // Show success message briefly before redirect
       setTimeout(() => {
         navigate('/');
