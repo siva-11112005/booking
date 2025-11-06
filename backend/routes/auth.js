@@ -273,16 +273,35 @@ router.post('/verify-otp', async (req, res) => {
       type: 'registration',
       expiresAt: { $gt: new Date() }
     };
-    
-    if (formattedPhone) otpQuery.phone = formattedPhone;
-    if (formattedEmail) otpQuery.email = formattedEmail;
-    
+
+    // Normalize phone variants to be tolerant of +91 / 0 / plain 10-digit formats
+    if (formattedPhone) {
+      const variants = new Set();
+      variants.add(formattedPhone);
+      const withoutPlus = formattedPhone.replace(/^\+91/, '');
+      variants.add(withoutPlus);
+      if (withoutPlus.length === 10) variants.add('0' + withoutPlus);
+
+      // If email also present, allow either phone variants OR the email
+      if (formattedEmail) {
+        otpQuery.$or = [
+          { email: formattedEmail },
+          { phone: { $in: Array.from(variants) } }
+        ];
+      } else {
+        otpQuery.phone = { $in: Array.from(variants) };
+      }
+    } else if (formattedEmail) {
+      otpQuery.email = formattedEmail;
+    }
+
     const otpRecord = await OTP.findOne(otpQuery).sort({ createdAt: -1 });
     
     if (!otpRecord) {
-      // Check if OTP exists but expired
-      delete otpQuery.expiresAt;
-      const expiredOTP = await OTP.findOne(otpQuery);
+  // Check if OTP exists but expired
+  const expiredQuery = JSON.parse(JSON.stringify(otpQuery));
+  delete expiredQuery.expiresAt;
+  const expiredOTP = await OTP.findOne(expiredQuery);
       
       if (expiredOTP) {
         return res.status(400).json({ 
@@ -684,16 +703,33 @@ router.post('/reset-password', async (req, res) => {
       type: 'password_reset',
       expiresAt: { $gt: new Date() }
     };
-    
-    if (formattedPhone) otpQuery.phone = formattedPhone;
-    if (formattedEmail) otpQuery.email = formattedEmail;
-    
+
+    if (formattedPhone) {
+      const variants = new Set();
+      variants.add(formattedPhone);
+      const withoutPlus = formattedPhone.replace(/^\+91/, '');
+      variants.add(withoutPlus);
+      if (withoutPlus.length === 10) variants.add('0' + withoutPlus);
+
+      if (formattedEmail) {
+        otpQuery.$or = [
+          { email: formattedEmail },
+          { phone: { $in: Array.from(variants) } }
+        ];
+      } else {
+        otpQuery.phone = { $in: Array.from(variants) };
+      }
+    } else if (formattedEmail) {
+      otpQuery.email = formattedEmail;
+    }
+
     const otpRecord = await OTP.findOne(otpQuery).sort({ createdAt: -1 });
     
     if (!otpRecord) {
-      // Check if OTP expired
-      delete otpQuery.expiresAt;
-      const expiredOTP = await OTP.findOne(otpQuery);
+  // Check if OTP expired
+  const expiredQuery = JSON.parse(JSON.stringify(otpQuery));
+  delete expiredQuery.expiresAt;
+  const expiredOTP = await OTP.findOne(expiredQuery);
       
       if (expiredOTP) {
         return res.status(400).json({ 

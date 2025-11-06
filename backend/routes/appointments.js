@@ -61,7 +61,28 @@ router.get('/slots/:date', async (req, res) => {
     }
     
     const allSlots = generateTimeSlots();
-    
+
+    // Helper: parse slot start time like '10:00 AM - 10:50 AM' -> Date on selectedDate
+    const parseSlotStart = (slotStr, baseDate) => {
+      try {
+        const startPart = slotStr.split('-')[0].trim(); // '10:00 AM'
+        // Create date using baseDate components
+        const parts = startPart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (!parts) return null;
+        let hour = parseInt(parts[1], 10);
+        const minute = parseInt(parts[2], 10);
+        const ampm = parts[3].toUpperCase();
+        if (ampm === 'PM' && hour !== 12) hour += 12;
+        if (ampm === 'AM' && hour === 12) hour = 0;
+
+        const d = new Date(baseDate);
+        d.setHours(hour, minute, 0, 0);
+        return d;
+      } catch (e) {
+        return null;
+      }
+    };
+
     const startOfDay = new Date(selectedDate);
     startOfDay.setHours(0, 0, 0, 0);
     
@@ -75,10 +96,28 @@ router.get('/slots/:date', async (req, res) => {
     
     const bookedSlots = bookedAppointments.map(apt => apt.timeSlot);
     
-    const slots = allSlots.map(slot => ({
-      time: slot,
-      isBooked: bookedSlots.includes(slot)
-    }));
+    const now = new Date();
+    const isToday = startOfDay.toDateString() === new Date().toDateString();
+
+    const slots = allSlots.map(slot => {
+      // If selected date is today, mark past slots or slots within 1 hour as unavailable
+      let unavailableDueToTime = false;
+      if (isToday) {
+        const slotStart = parseSlotStart(slot, startOfDay);
+        if (slotStart) {
+          const msToStart = slotStart.getTime() - now.getTime();
+          // If slot already started or less than 1 hour to start, mark unavailable
+          if (msToStart <= 0 || msToStart < (60 * 60 * 1000)) {
+            unavailableDueToTime = true;
+          }
+        }
+      }
+
+      return {
+        time: slot,
+        isBooked: bookedSlots.includes(slot) || unavailableDueToTime
+      };
+    });
     
     res.json({ 
       success: true,
