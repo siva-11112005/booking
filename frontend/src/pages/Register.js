@@ -33,20 +33,25 @@ const Register = () => {
     setError('');
   };
 
-const handleSendOTP = async () => {
+const handleSendOTP = async (preferEmail = false) => {
   // Frontend validation
   if (!formData.name.trim()) {
     setError('Please enter your name');
     return;
   }
 
-  if (!formData.phone.trim()) {
-    setError('Please enter your phone number');
+  if (!formData.phone.trim() && !formData.email.trim()) {
+    setError('Please enter either phone number or email');
     return;
   }
 
-  if (formData.phone.trim().length !== 10) {
+  if (formData.phone.trim() && formData.phone.trim().length !== 10) {
     setError('Please enter a valid 10-digit mobile number');
+    return;
+  }
+
+  if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+    setError('Please enter a valid email address');
     return;
   }
 
@@ -74,15 +79,26 @@ const handleSendOTP = async () => {
     setLoading(true);
     setError('');
     
-    let phone = formData.phone.trim();
-    if (!phone.startsWith('+91')) {
-      phone = '+91' + phone.replace(/^0+/, '');
+    const payload = {
+      preferEmail
+    };
+
+    if (formData.phone.trim()) {
+      let phone = formData.phone.trim();
+      if (!phone.startsWith('+91')) {
+        phone = '+91' + phone.replace(/^0+/, '');
+      }
+      payload.phone = phone;
     }
 
-    await sendOTP(phone);
+    if (formData.email.trim()) {
+      payload.email = formData.email.trim();
+    }
+
+    await sendOTP(payload);
     setOtpSent(true);
     setOtpTimer(300);
-    setSuccess('OTP sent successfully! Valid for 5 minutes.');
+    setSuccess(`OTP sent successfully to your ${preferEmail ? 'email' : 'phone'}! Valid for 5 minutes.`);
     setStep(2);
     setTimeout(() => setSuccess(''), 5000);
   } catch (err) {
@@ -132,9 +148,21 @@ const handleSendOTP = async () => {
 
       const response = await verifyOTP(registrationData);
 
+      // Store auth token and user data
       localStorage.setItem('token', response.data.token);
-      setSuccess('Registration successful! Redirecting...');
-      setTimeout(() => navigate('/'), 1500);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+      
+      setSuccess('Registration successful! Logging you in...');
+      
+      // Trigger auto-login by dispatching user data to auth context
+      if (onLoginSuccess) {
+        onLoginSuccess(response.data);
+      }
+      
+      // Show success message briefly before redirect
+      setTimeout(() => {
+        navigate('/');
+      }, 1500);
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed');
     } finally {
@@ -281,6 +309,27 @@ const handleSendOTP = async () => {
                 {loading ? 'Sending OTP...' : 'Send OTP'}
               </button>
             </div>
+            {formData.email && (
+              <div style={{ textAlign: 'center', marginTop: '15px' }}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleSendOTP(true);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#e67e22',
+                    textDecoration: 'underline',
+                    cursor: 'pointer',
+                    fontSize: '0.9em'
+                  }}
+                >
+                  Get code via email instead
+                </button>
+              </div>
+            )}
           </form>
         ) : (
           <form onSubmit={handleRegister}>

@@ -106,8 +106,8 @@ router.get('/slots/:date', async (req, res) => {
         const slotStart = parseSlotStart(slot, startOfDay);
         if (slotStart) {
           const msToStart = slotStart.getTime() - now.getTime();
-          // If slot already started or less than 1 hour to start, mark unavailable
-          if (msToStart <= 0 || msToStart < (60 * 60 * 1000)) {
+          // If slot already started or less than 30 minutes to start, mark unavailable
+          if (msToStart <= 0 || msToStart < (30 * 60 * 1000)) {
             unavailableDueToTime = true;
           }
         }

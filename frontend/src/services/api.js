@@ -39,7 +39,7 @@ api.interceptors.response.use(
 );
 
 // Auth APIs
-export const sendOTP = (phone) => api.post('/auth/send-otp', { phone });
+export const sendOTP = (data) => api.post('/auth/send-otp', data);
 export const verifyOTP = (data) => api.post('/auth/verify-otp', data);
 export const login = (data) => api.post('/auth/login', data);
 export const forgotPassword = (phone) => api.post('/auth/forgot-password', { phone });

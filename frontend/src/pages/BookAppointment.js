@@ -241,7 +241,14 @@ Select date → choose time → confirm booking
                     </div>
                     <div className="slot-time">{slot.time}</div>
                     <div className="slot-status">
-                      {slot.isBooked ? '🔴 BOOKED' : '✅ AVAILABLE'}
+                      {slot.isBooked ? (
+                        isToday ? '🔴 BOOKING CLOSED' : '🔴 BOOKED'
+                      ) : (
+                        <>✅ AVAILABLE<br/>
+                        <span style={{fontSize: '0.8em', color: '#666'}}>
+                          (Closes 30 mins before start)
+                        </span></>
+                      )}
                     </div>
                   </div>
                 ))}
