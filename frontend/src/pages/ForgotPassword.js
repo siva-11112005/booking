@@ -6,6 +6,7 @@ const ForgotPassword = () => {
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     phone: '',
+    email: '',
     otp: '',
     newPassword: '',
     confirmPassword: ''
@@ -15,6 +16,8 @@ const ForgotPassword = () => {
   const [loading, setLoading] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [otpTimer, setOtpTimer] = useState(0);
+  const sendVia = 'sms'; // default method when not specified
+  const [otpMethod, setOtpMethod] = useState(''); // Track which method was used
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -31,31 +34,58 @@ const ForgotPassword = () => {
     setError('');
   };
 
-  const handleSendOTP = async () => {
+  const handleSendOTP = async (via) => {
   // Frontend validation
-  if (!formData.phone.trim()) {
-    setError('Please enter your phone number');
-    return;
-  }
-
-  if (formData.phone.trim().length !== 10) {
-    setError('Please enter a valid 10-digit mobile number');
-    return;
+  const method = via || sendVia;
+  if (method === 'sms') {
+    if (!formData.phone.trim()) {
+      setError('Please enter your phone number');
+      return;
+    }
+    if (formData.phone.trim().length !== 10) {
+      setError('Please enter a valid 10-digit mobile number');
+      return;
+    }
+  } else {
+    if (!formData.email.trim()) {
+      setError('Please enter your email address');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setError('Please enter a valid email address');
+      return;
+    }
   }
 
   try {
     setLoading(true);
     setError('');
     
-    let phone = formData.phone.trim();
-    if (!phone.startsWith('+91')) {
-      phone = '+91' + phone.replace(/^0+/, '');
+    let phone = '';
+    let email = '';
+
+    if (method === 'sms') {
+      phone = formData.phone.trim();
+      if (!phone.startsWith('+91')) {
+        phone = '+91' + phone.replace(/^0+/, '');
+      }
+    } else {
+      email = formData.email.trim().toLowerCase();
     }
 
-    await forgotPassword(phone);
+    await forgotPassword({
+      phone,
+      email,
+      sendVia: method
+    });
+
+    setOtpMethod(method);
     setOtpSent(true);
     setOtpTimer(300);
-    setSuccess('OTP sent successfully! Valid for 5 minutes.');
+    
+    const methodText = method === 'sms' ? `to +91${formData.phone}` : `to ${formData.email}`;
+    setSuccess(`✅ OTP sent ${methodText}! Valid for 5 minutes.`);
     setStep(2);
     setTimeout(() => setSuccess(''), 5000);
   } catch (err) {
@@ -98,18 +128,26 @@ const handleResetPassword = async (e) => {
   setLoading(true);
 
   try {
-    let phone = formData.phone.trim();
-    if (!phone.startsWith('+91')) {
-      phone = '+91' + phone.replace(/^0+/, '');
+    let phone = '';
+    let email = '';
+
+    if (otpMethod === 'sms') {
+      phone = formData.phone.trim();
+      if (!phone.startsWith('+91')) {
+        phone = '+91' + phone.replace(/^0+/, '');
+      }
+    } else {
+      email = formData.email.trim().toLowerCase();
     }
 
     await resetPassword({
       phone,
+      email,
       otp: formData.otp,
       newPassword: formData.newPassword
     });
 
-    setSuccess('Password reset successfully! Redirecting to login...');
+    setSuccess('✅ Password reset successfully! Redirecting to login...');
     setTimeout(() => navigate('/login'), 2000);
   } catch (err) {
     setError(err.response?.data?.message || 'Password reset failed');
@@ -138,7 +176,7 @@ const handleResetPassword = async (e) => {
         {success && <div className="alert alert-success">{success}</div>}
 
         {step === 1 ? (
-          <form onSubmit={(e) => { e.preventDefault(); handleSendOTP(); }}>
+          <form onSubmit={(e) => { e.preventDefault(); }}>
             <div className="form-group">
               <label>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -151,13 +189,35 @@ const handleResetPassword = async (e) => {
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
-                required
                 placeholder="10 digits"
                 pattern="[6-9][0-9]{9}"
                 maxLength="10"
               />
               <div className="form-note">
-                Enter your registered 10-digit mobile number
+                Enter your registered 10-digit mobile number. OTP will be sent via SMS.
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                </svg>
+                Registered Email Address *
+              </label>
+              <input
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="your@email.com"
+              />
+              <div className="form-note">
+                Enter your registered email address. OTP will be sent via email.
+              </div>
+              <div className="form-note" style={{ marginTop: '8px' }}>
+                No email on file? Update it in your <Link to="/profile">Profile</Link>.
               </div>
             </div>
 
@@ -169,22 +229,39 @@ const handleResetPassword = async (e) => {
               >
                 Cancel
               </button>
-              <button 
-                type="submit"
-                className="btn-modal btn-modal-submit"
-                disabled={loading}
-              >
-                {loading ? 'Sending OTP...' : 'Send OTP'}
-              </button>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  type="button"
+                  className="btn-modal btn-modal-submit"
+                  disabled={loading || !formData.phone}
+                  onClick={(e) => { e.preventDefault(); handleSendOTP('sms'); }}
+                >
+                  {loading ? 'Sending...' : 'Send via SMS'}
+                </button>
+                <button 
+                  type="button"
+                  className="btn-modal btn-modal-submit"
+                  disabled={loading || !formData.email}
+                  onClick={(e) => { e.preventDefault(); handleSendOTP('email'); }}
+                >
+                  {loading ? 'Sending...' : 'Send via Email'}
+                </button>
+              </div>
             </div>
           </form>
         ) : (
           <form onSubmit={handleResetPassword}>
             <div style={{ padding: '25px', background: '#e8f5e9', borderRadius: '12px', marginBottom: '25px', textAlign: 'center' }}>
-              <div style={{ fontSize: '1.1em', marginBottom: '10px', color: '#155724' }}>
-                ✅ OTP sent to +91{formData.phone}
+              <div style={{ fontSize: '1.1em', marginBottom: '10px', color: '#155724', fontWeight: '600' }}>
+                ✅ OTP Sent Successfully
               </div>
-              <div style={{ fontSize: '0.95em', color: '#666' }}>
+              <div style={{ fontSize: '0.95em', color: '#666', marginBottom: '8px' }}>
+                {otpMethod === 'sms' 
+                  ? `📱 Sent to: +91${formData.phone}` 
+                  : `📧 Sent to: ${formData.email}`
+                }
+              </div>
+              <div style={{ fontSize: '0.9em', color: '#666' }}>
                 Valid for 5 minutes • Max 3 attempts
               </div>
             </div>
@@ -262,11 +339,18 @@ const handleResetPassword = async (e) => {
                   setStep(1);
                   setOtpSent(false);
                   setOtpTimer(0);
-                  setFormData({ phone: formData.phone, otp: '', newPassword: '', confirmPassword: '' });
+                  setOtpMethod('');
+                  setFormData({ 
+                    phone: formData.phone, 
+                    email: formData.email,
+                    otp: '', 
+                    newPassword: '', 
+                    confirmPassword: '' 
+                  });
                 }}
                 className="btn-modal btn-modal-cancel"
               >
-                Change Number
+                {otpMethod === 'sms' ? 'Use Email Instead' : 'Use Mobile Instead'}
               </button>
               <button 
                 type="submit"
@@ -292,7 +376,7 @@ const handleResetPassword = async (e) => {
                     textDecoration: 'underline'
                   }}
                 >
-                  Resend OTP
+                  🔄 Resend OTP
                 </button>
               </div>
             )}

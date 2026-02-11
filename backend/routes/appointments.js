@@ -4,9 +4,13 @@ const Appointment = require('../models/Appointment');
 const User = require('../models/User');
 const { auth } = require('../middleware/auth');
 const { generateTimeSlots } = require('../utils/timeSlots');
+const BlockedSlot = require('../models/BlockedSlot');
 const notificationService = require('../utils/notificationService');
 
 // ============================================
+const RecurringBlockedSlot = require('../models/RecurringBlockedSlot');
+const Holiday = require('../models/Holiday');
+const Waitlist = require('../models/Waitlist');
 // DEVELOPMENT PRICING (EVERYTHING ₹1)
 // ============================================
 const PRICING = {
@@ -60,6 +64,17 @@ router.get('/slots/:date', async (req, res) => {
       });
     }
     
+    // Check holiday closures first
+    const holiday = await Holiday.findOne({
+      date: {
+        $gte: new Date(new Date(date).setHours(0, 0, 0, 0)),
+        $lt: new Date(new Date(date).setHours(23, 59, 59, 999))
+      }
+    });
+    if (holiday) {
+      return res.json({ success: true, slots: [], message: `Clinic closed: ${holiday.reason}` });
+    }
+    
     const allSlots = generateTimeSlots();
 
     // Helper: parse slot start time like '10:00 AM - 10:50 AM' -> Date on selectedDate
@@ -95,29 +110,23 @@ router.get('/slots/:date', async (req, res) => {
     });
     
     const bookedSlots = bookedAppointments.map(apt => apt.timeSlot);
+
+    // Fetch admin-blocked slots for this date
+    // Recurring blocked slots for this weekday
+    const weekday = selectedDate.getDay();
+    const recurring = await RecurringBlockedSlot.find({ weekday }).lean();
+    const recurringBlocked = recurring.map(r => r.timeSlot);
     
-    const now = new Date();
-    const isToday = startOfDay.toDateString() === new Date().toDateString();
-
-    const slots = allSlots.map(slot => {
-      // If selected date is today, mark past slots or slots within 1 hour as unavailable
-      let unavailableDueToTime = false;
-      if (isToday) {
-        const slotStart = parseSlotStart(slot, startOfDay);
-        if (slotStart) {
-          const msToStart = slotStart.getTime() - now.getTime();
-          // If slot already started or less than 30 minutes to start, mark unavailable
-          if (msToStart <= 0 || msToStart < (30 * 60 * 1000)) {
-            unavailableDueToTime = true;
-          }
-        }
-      }
-
-      return {
-        time: slot,
-        isBooked: bookedSlots.includes(slot) || unavailableDueToTime
-      };
-    });
+    const blocked = await BlockedSlot.find({
+      date: { $gte: startOfDay, $lt: endOfDay }
+    }).lean();
+    const blockedSlots = blocked.map(b => b.timeSlot);
+    
+    const slots = allSlots.map(slot => ({
+      time: slot,
+      isBooked: bookedSlots.includes(slot) || blockedSlots.includes(slot) || recurringBlocked.includes(slot),
+      blocked: blockedSlots.includes(slot) || recurringBlocked.includes(slot)
+    }));
     
     res.json({ 
       success: true,
@@ -139,6 +148,7 @@ router.post('/book', auth, async (req, res) => {
       return res.status(403).json({ message: 'Admin cannot book appointments' });
     }
     
+      //
     if (req.user.isBlocked) {
       return res.status(403).json({ message: 'Your account is blocked' });
     }
@@ -182,6 +192,30 @@ router.post('/book', auth, async (req, res) => {
     if (existingAppointment) {
       return res.status(400).json({ message: 'Slot already booked' });
     }
+
+    // Reject booking if admin has blocked the slot for this date
+    const blockedSlot = await BlockedSlot.findOne({
+      date: { $gte: startOfDay, $lt: endOfDay },
+      timeSlot
+    });
+    if (blockedSlot) {
+      return res.status(400).json({ message: 'Slot is blocked by admin' });
+    }
+
+    // Reject booking if recurring block exists for this weekday/slot
+    const weekday = appointmentDate.getDay();
+    const recurringBlock = await RecurringBlockedSlot.findOne({ weekday, timeSlot });
+    if (recurringBlock) {
+      return res.status(400).json({ message: 'Slot is blocked (recurring)' });
+    }
+
+    // Reject booking if clinic is closed due to a holiday
+    const holiday = await Holiday.findOne({
+      date: { $gte: startOfDay, $lt: endOfDay }
+    });
+    if (holiday) {
+      return res.status(400).json({ message: `Clinic closed: ${holiday.reason}` });
+    }
     
     const pendingCount = await Appointment.countDocuments({
       user: req.user._id,
@@ -217,14 +251,7 @@ router.post('/book', auth, async (req, res) => {
     const userPhone = phone || req.user.phone;
     const userEmail = email || req.user.email;
     
-    await notificationService.sendBookingConfirmation(
-      userPhone,
-      userEmail,
-      req.user.name,
-      formattedDate,
-      timeSlot,
-      painType
-    );
+    // Do not send SMS/Email on booking. Admin verification will trigger notifications.
     
     console.log('✅ Appointment booked:', {
       user: req.user.name,
@@ -431,6 +458,110 @@ router.get('/stats/user', auth, async (req, res) => {
   } catch (error) {
     console.error('Get Stats Error:', error);
     res.status(500).json({ message: 'Failed to fetch stats' });
+  }
+});
+
+// ============================================
+// JOIN WAITLIST FOR A SLOT
+// ============================================
+router.post('/waitlist', auth, async (req, res) => {
+  try {
+    const { date, timeSlot, reason } = req.body;
+    if (!date || !timeSlot) {
+      return res.status(400).json({ message: 'Date and timeSlot required' });
+    }
+    const wl = await Waitlist.create({
+      user: req.user._id,
+      date: new Date(date),
+      timeSlot,
+      reason: reason || ''
+    });
+    res.status(201).json({ success: true, message: 'Added to waitlist', waitlist: wl });
+  } catch (error) {
+    if (error && error.code === 11000) {
+      return res.status(400).json({ message: 'Already added to waitlist for this slot' });
+    }
+    console.error('Waitlist Error:', error);
+    res.status(500).json({ message: 'Failed to join waitlist' });
+  }
+});
+
+// ============================================
+// RESCHEDULE APPOINTMENT (USER)
+// ============================================
+router.put('/reschedule/:id', auth, async (req, res) => {
+  try {
+    const { date, timeSlot, reason } = req.body;
+    if (!date || !timeSlot) {
+      return res.status(400).json({ message: 'Date and timeSlot required' });
+    }
+    const appointment = await Appointment.findById(req.params.id);
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found' });
+    }
+    if (appointment.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    if (['cancelled', 'completed'].includes(appointment.status)) {
+      return res.status(400).json({ message: 'Cannot reschedule cancelled or completed appointment' });
+    }
+
+    const newDate = new Date(date);
+    const startOfDay = new Date(newDate); startOfDay.setHours(0,0,0,0);
+    const endOfDay = new Date(newDate); endOfDay.setHours(23,59,59,999);
+
+    // Check slot availability for the new schedule
+    const exists = await Appointment.findOne({
+      date: { $gte: startOfDay, $lt: endOfDay },
+      timeSlot,
+      status: { $in: ['pending','confirmed'] }
+    });
+    if (exists) {
+      return res.status(400).json({ message: 'New slot already booked' });
+    }
+    const blockedSlot = await BlockedSlot.findOne({ date: { $gte: startOfDay, $lt: endOfDay }, timeSlot });
+    if (blockedSlot) {
+      return res.status(400).json({ message: 'New slot is blocked by admin' });
+    }
+    const weekday = newDate.getDay();
+    const recurringBlock = await RecurringBlockedSlot.findOne({ weekday, timeSlot });
+    if (recurringBlock) {
+      return res.status(400).json({ message: 'New slot is blocked (recurring)' });
+    }
+    const holiday = await Holiday.findOne({ date: { $gte: startOfDay, $lt: endOfDay } });
+    if (holiday) {
+      return res.status(400).json({ message: `Clinic closed: ${holiday.reason}` });
+    }
+
+    // Apply changes and reset confirmation/payment/reminders
+    appointment.date = newDate;
+    appointment.timeSlot = timeSlot;
+    appointment.reason = reason || appointment.reason;
+    appointment.status = 'pending';
+    appointment.paymentStatus = 'pending';
+    appointment.paymentMethod = 'pending';
+    appointment.reminder24Sent = false;
+    appointment.reminder2Sent = false;
+    appointment.rescheduledAt = new Date();
+    await appointment.save();
+
+    // Audit log (non-blocking)
+    try {
+      const AuditLog = require('../models/AuditLog');
+      await AuditLog.create({
+        user: req.user._id,
+        type: 'appointment_reschedule',
+        methodUsed: 'none',
+        details: { appointment: appointment._id, toDate: newDate, toSlot: timeSlot }
+      });
+    } catch (e) {
+      console.warn('Audit reschedule failed:', e.message);
+    }
+
+    res.json({ success: true, message: 'Appointment rescheduled. Awaiting admin confirmation.', appointment });
+  } catch (error) {
+    console.error('Reschedule Error:', error);
+    res.status(500).json({ message: 'Failed to reschedule' });
   }
 });
 

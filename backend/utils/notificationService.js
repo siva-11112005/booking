@@ -199,6 +199,105 @@ class NotificationService {
 
     return results;
   }
+
+  // ============================================
+  // Send Account Update Notification (Email Only)
+  // ============================================
+  async sendAccountUpdateEmail(email, name, updateType, details = {}) {
+    console.log('\n═══════════════════════════════════════');
+    console.log('📧 SENDING ACCOUNT UPDATE NOTIFICATION');
+    console.log('═══════════════════════════════════════');
+    console.log('📧 Email:', email || 'Not provided');
+    console.log('📝 Update Type:', updateType);
+    console.log('═══════════════════════════════════════\n');
+    
+    const results = { email: false };
+
+    if (!email) {
+      console.log('⚠️  Email not provided');
+      return results;
+    }
+    
+    try {
+      let emailSubject = 'Account Update - Eswari Physiotherapy';
+      let emailContent = '';
+
+      switch(updateType) {
+        case 'profile_updated':
+          emailSubject = '✏️ Your Profile Has Been Updated - Eswari Physiotherapy';
+          emailContent = `Hi ${name},\n\nYour profile information has been updated successfully.\n\nUpdated Fields:\n${details.fields ? details.fields.join(', ') : 'Profile'}\n\nIf you didn't make this change, please contact us immediately.\n\nContact: ${process.env.ADMIN_PHONE}`;
+          break;
+        case 'password_changed':
+          emailSubject = '🔒 Your Password Has Been Changed - Eswari Physiotherapy';
+          emailContent = `Hi ${name},\n\nYour password has been successfully changed.\n\nIf you didn't make this change, please contact us immediately.\n\nContact: ${process.env.ADMIN_PHONE}`;
+          break;
+        case 'email_updated':
+          emailSubject = '📧 Your Email Has Been Updated - Eswari Physiotherapy';
+          emailContent = `Hi ${name},\n\nYour email address has been successfully updated to: ${details.newEmail}\n\nIf you didn't make this change, please contact us immediately.\n\nContact: ${process.env.ADMIN_PHONE}`;
+          break;
+        case 'phone_updated':
+          emailSubject = '📱 Your Phone Number Has Been Updated - Eswari Physiotherapy';
+          emailContent = `Hi ${name},\n\nYour phone number has been successfully updated.\n\nIf you didn't make this change, please contact us immediately.\n\nContact: ${process.env.ADMIN_PHONE}`;
+          break;
+        default:
+          emailContent = `Hi ${name},\n\nYour account has been updated: ${updateType}`;
+      }
+
+      await emailService.sendGenericEmail(
+        email,
+        emailSubject,
+        emailContent
+      );
+
+      results.email = true;
+      console.log('✅ Account update email sent successfully');
+    } catch (error) {
+      console.error('❌ Email Error:', error.message);
+    }
+
+    console.log('\n═══════════════════════════════════════');
+    console.log('📊 NOTIFICATION RESULTS:');
+    console.log('   Email:', results.email ? '✅ Sent' : '❌ Failed');
+    console.log('═══════════════════════════════════════\n');
+
+    return results;
+  }
+
+  // ============================================
+  // Send Login Alert Email
+  // ============================================
+  async sendLoginAlertEmail(email, name, loginDetails = {}) {
+    console.log('\n═══════════════════════════════════════');
+    console.log('🔐 SENDING LOGIN ALERT');
+    console.log('═══════════════════════════════════════');
+    console.log('📧 Email:', email || 'Not provided');
+    console.log('═══════════════════════════════════════\n');
+    
+    const results = { email: false };
+
+    if (!email) {
+      console.log('⚠️  Email not provided');
+      return results;
+    }
+    
+    try {
+      const timestamp = loginDetails.timestamp || new Date().toLocaleString('en-IN');
+      const device = loginDetails.device || 'Web Browser';
+
+      await emailService.sendGenericEmail(
+        email,
+        '🔐 New Login Alert - Eswari Physiotherapy',
+        `Hi ${name},\n\nA new login was detected on your account.\n\nLogin Details:\n- Time: ${timestamp}\n- Device: ${device}\n\nIf this wasn't you, please change your password immediately.\n\nChange Password: https://booking-fskl.onrender.com/forgot-password\n\nNeed Help? Contact: ${process.env.ADMIN_PHONE}`
+      );
+
+      results.email = true;
+      console.log('✅ Login alert email sent successfully');
+    } catch (error) {
+      console.error('❌ Email Error:', error.message);
+    }
+
+    return results;
+  }
 }
 
 module.exports = new NotificationService();

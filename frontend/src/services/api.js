@@ -42,7 +42,7 @@ api.interceptors.response.use(
 export const sendOTP = (data) => api.post('/auth/send-otp', data);
 export const verifyOTP = (data) => api.post('/auth/verify-otp', data);
 export const login = (data) => api.post('/auth/login', data);
-export const forgotPassword = (phone) => api.post('/auth/forgot-password', { phone });
+export const forgotPassword = (data) => api.post('/auth/forgot-password', data);
 export const resetPassword = (data) => api.post('/auth/reset-password', data);
 export const getCurrentUser = () => api.get('/auth/me');
 
@@ -57,6 +57,9 @@ export const getAllAppointments = (params) => api.get('/admin/appointments', { p
 export const updateAppointmentStatus = (id, data) => api.patch(`/admin/appointments/${id}`, data);
 export const getAllUsers = () => api.get('/admin/users');
 export const blockUser = (id, isBlocked) => api.patch(`/admin/users/${id}/block`, { isBlocked });
+export const toggleAdmin = (id, isAdmin) => api.patch(`/admin/users/${id}/admin`, { isAdmin });
 export const getAdminStats = () => api.get('/admin/stats');
+// Admin busy/blocked slots
+export const getBlockedSlots = (date) => api.get('/admin/blocked-slots', { params: { date } });
 
 export default api;

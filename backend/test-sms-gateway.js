@@ -7,7 +7,7 @@ async function testSMSGateway() {
   console.log('🧪 TESTING SMS GATEWAY (FREE SERVICE)');
   console.log('════════════════════════════════════════\n');
   
-  const testPhone = '+916382016126';
+  const testPhone = '+917418042205';
   const testEmail = 'sivasakthivelpalanisamy11@gmail.com';
   const testName = 'Test User';
   const testOTP = '123456';

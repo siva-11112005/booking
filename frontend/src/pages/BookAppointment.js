@@ -4,8 +4,10 @@ import { getAvailableSlots, bookAppointment } from '../services/api';
 import { AuthContext } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 import Payment from '../components/Payment';
+import { useTranslation } from 'react-i18next';
 
 const BookAppointment = () => {
+const { t } = useTranslation();
 console.log('BookAppointment CLEAN v3'); // sanity log
 const { user } = useContext(AuthContext);
 const navigate = useNavigate();
@@ -16,6 +18,23 @@ location.state?.date || new Date().toISOString().split('T')[0]
 );
 const [selectedSlot, setSelectedSlot] = useState(location.state?.time || null);
 const [slots, setSlots] = useState([]);
+  // Fix: prevent 12:00 PM from showing in afternoon by filtering explicit hours
+  const parseHour = (slotStr) => {
+    try {
+      const start = slotStr.split('-')[0].trim();
+      const m = start.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+      if (!m) return null;
+      let h = parseInt(m[1], 10);
+      const ampm = m[3].toUpperCase();
+      if (ampm === 'PM' && h !== 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      return h;
+    } catch (_) { return null; }
+  };
+  const afternoonStrict = slots.filter(slot => {
+    const h = parseHour(slot.time);
+    return h !== null && h >= 14 && h <= 17; // 2 PM to 5 PM
+  });
 const [loading, setLoading] = useState(false);
 const [error, setError] = useState('');
 const [showModal, setShowModal] = useState(false);
@@ -106,7 +125,6 @@ setSelectedSlot(null);
 setError('');
 };
 
-const painTypes = ['Back Pain', 'Neck Pain', 'Knee Pain', 'Shoulder Pain', 'Sports Injury', 'Other'];
 
 const selectedDateObj = new Date(selectedDate + 'T00:00:00');
 const isSunday = selectedDateObj.getDay() === 0;
@@ -117,7 +135,32 @@ const hour = parseInt(slot.time.split(':')[0], 10);
 return hour >= 10 && hour <= 12;
 });
 
-const afternoonSlots = slots.filter(slot => slot.time.includes('PM') && !slot.time.includes('01:00 PM'));
+
+// Helper: parse slot start time string to Date
+const parseSlotStart = (slotStr, baseDateStr) => {
+  try {
+    const base = new Date(baseDateStr + 'T00:00:00');
+    const startPart = slotStr.split('-')[0].trim();
+    const m = startPart.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (!m) return null;
+    let h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    const ampm = m[3].toUpperCase();
+    if (ampm === 'PM' && h !== 12) h += 12;
+    if (ampm === 'AM' && h === 12) h = 0;
+    const d = new Date(base);
+    d.setHours(h, min, 0, 0);
+    return d;
+  } catch (_) { return null; }
+};
+
+const isSlotClosed = (slot) => {
+  if (!isToday) return false;
+  const start = parseSlotStart(slot.time, selectedDate);
+  if (!start) return false;
+  const diff = start.getTime() - Date.now();
+  return diff <= (30 * 60 * 1000);
+};
 
 return (
 <>
@@ -181,13 +224,19 @@ Select date → choose time → confirm booking
             color: '#333', marginBottom: '16px', fontSize: '1.2em',
             display: 'flex', alignItems: 'center', gap: '8px'
           }}>
-            <span>⏰</span> Choose Time Slot
+            <span>⏰</span> {t('booking.selectTime')}
           </h2>
+
+          {isToday && (
+            <div style={{ background: '#fff3cd', padding: '12px', borderRadius: '8px', marginBottom: '12px', color: '#856404', textAlign: 'center' }}>
+              ⚠️ {t('booking.todayCutoff')}
+            </div>
+          )}
 
           {morningSlots.length > 0 && (
             <div style={{ marginBottom: '24px' }}>
               <h3 style={{ color: '#666', marginBottom: '10px', fontSize: '1em', borderBottom: '1px solid #f0f0f0', paddingBottom: '8px' }}>
-                🌅 Morning (10:00 AM - 1:00 PM)
+                🌅 {t('booking.morningSlots')} (10:00 AM - 1:00 PM)
               </h3>
               <div className="slots-grid">
                 {morningSlots.map((slot, index) => {
@@ -207,7 +256,7 @@ Select date → choose time → confirm booking
                       </div>
                       <div className="slot-time">{slot.time}</div>
                       <div className="slot-status">
-                        {isLunch ? 'Lunch Break' : slot.isBooked ? '🔴 BOOKED' : '✅ AVAILABLE'}
+                        {isLunch ? t('booking.lunchBreak') : slot.isBooked ? '🔴 ' + t('booking.booked') : (isSlotClosed(slot) ? '🔴 BOOKING CLOSED' : '✅ ' + t('booking.available'))}
                       </div>
                     </div>
                   );
@@ -218,16 +267,16 @@ Select date → choose time → confirm booking
 
           {/* Lunch */}
           <div style={{ background: '#fff3cd', padding: '10px', borderRadius: '8px', marginBottom: '24px', textAlign: 'center', color: '#856404' }}>
-            🍽️ Lunch Break: 1:00 PM - 2:00 PM
+            🍽️ {t('booking.lunchBreak')}: 1:00 PM - 2:00 PM
           </div>
 
-          {afternoonSlots.length > 0 && (
+          {afternoonStrict.length > 0 && (
             <div>
               <h3 style={{ color: '#666', marginBottom: '10px', fontSize: '1em', borderBottom: '1px solid #f0f0f0', paddingBottom: '8px' }}>
-                ☀️ Afternoon (2:00 PM - 5:00 PM)
+                ☀️ {t('booking.afternoonSlots')} (2:00 PM - 5:00 PM)
               </h3>
               <div className="slots-grid">
-                {afternoonSlots.map((slot, index) => (
+                {afternoonStrict.map((slot, index) => (
                   <div 
                     key={index}
                     className={`slot-card ${slot.isBooked ? 'booked' : 'available'}`}
@@ -242,14 +291,18 @@ Select date → choose time → confirm booking
                     </div>
                     <div className="slot-time">{slot.time}</div>
                     <div className="slot-status">
-                      {slot.isBooked ? (
-                        isToday ? '🔴 BOOKING CLOSED' : '🔴 BOOKED'
-                      ) : (
-                        <>✅ AVAILABLE<br/>
-                        <span style={{fontSize: '0.8em', color: '#666'}}>
-                          (Closes 30 mins before start)
-                        </span></>
-                      )}
+                      {slot.isBooked
+                        ? ('🔴 ' + t('booking.booked'))
+                        : (isSlotClosed(slot)
+                          ? ('🔴 ' + t('booking.bookingClosed'))
+                          : (<>
+                              ✅ {t('booking.available')}
+                              {isToday && (
+                                <><br/><span style={{fontSize: '0.8em', color: '#666'}}>
+                                  {t('booking.closesNote')}
+                                </span></>
+                              )}
+                            </>))}
                     </div>
                   </div>
                 ))}

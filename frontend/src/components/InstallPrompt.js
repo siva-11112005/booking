@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import './InstallPrompt.css';
 
 const InstallPrompt = () => {
-  const { t } = useTranslation();
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showPrompt, setShowPrompt] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);

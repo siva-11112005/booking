@@ -8,9 +8,11 @@ import Home from './pages/Home';
 import BookAppointment from './pages/BookAppointment';
 import MyAppointments from './pages/MyAppointments';
 import AdminDashboard from './pages/AdminDashboard';
+import Profile from './pages/Profile';
 import PrivateRoute from './components/PrivateRoute';
 import AdminRoute from './components/AdminRoute';
 import InstallPrompt from './components/InstallPrompt';
+import LanguagePrompt from './components/LanguagePrompt';
 import './App.css';
 import './i18n/config'; // Import i18n configuration
 
@@ -26,6 +28,7 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/book" element={<PrivateRoute><BookAppointment /></PrivateRoute>} />
           <Route path="/my-appointments" element={<PrivateRoute><MyAppointments /></PrivateRoute>} />
+          <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
           
           <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
           
@@ -34,6 +37,8 @@ function App() {
         
         {/* PWA Install Prompt */}
         <InstallPrompt />
+        {/* First-visit language preference */}
+        <LanguagePrompt />
       </Router>
     </AuthProvider>
   );

@@ -2,12 +2,20 @@ const nodemailer = require('nodemailer');
 
 class EmailService {
   constructor() {
-    // Create transporter with Gmail or your email service
+    // Validate env configuration
+    const emailUser = process.env.EMAIL_USER;
+    const emailPass = process.env.EMAIL_APP_PASSWORD;
+
+    if (!emailUser || !emailPass) {
+      console.warn('⚠️  EMAIL_USER / EMAIL_APP_PASSWORD not set. Configure Gmail App Password for reliable email OTP.');
+    }
+
+    // Create transporter with Gmail (App Password recommended)
     this.transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: process.env.EMAIL_USER || 'sivasakthivelpalanisamy11@gmail.com',
-        pass: process.env.EMAIL_APP_PASSWORD // Use App Password for Gmail
+        user: emailUser,
+        pass: emailPass
       }
     });
 
@@ -120,8 +128,8 @@ class EmailService {
               [Your Clinic Address Here]</p>
               
               <p><strong>Contact:</strong><br>
-              📞 +919524350214<br>
-              ✉️ eswaripalani2002@gmail.com</p>
+              📞 ${process.env.ADMIN_PHONE || '+917418042205'}<br>
+              ✉️ ${process.env.ADMIN_EMAIL || 'eswaripalani2002@gmail.com'}</p>
 
               <p>If you need to cancel or reschedule, please contact us at least 2 hours in advance.</p>
               
@@ -176,8 +184,8 @@ class EmailService {
               <p>If you wish to book another appointment, please visit our website or contact us directly.</p>
               
               <p><strong>Contact:</strong><br>
-              📞 +919524350214<br>
-              ✉️ eswaripalani2002@gmail.com</p>
+              📞 ${process.env.ADMIN_PHONE || '+917418042205'}<br>
+              ✉️ ${process.env.ADMIN_EMAIL || 'eswaripalani2002@gmail.com'}</p>
               
               <br>
               <p>We apologize for any inconvenience caused.</p>
@@ -199,7 +207,7 @@ class EmailService {
   async sendEmail(to, template) {
     try {
       const mailOptions = {
-        from: `"Eswari Physiotherapy" <${process.env.EMAIL_USER || 'eswaripalani2002@gmail.com'}>`,
+        from: `"Eswari Physiotherapy" <${process.env.EMAIL_USER || process.env.ADMIN_EMAIL || 'eswaripalani2002@gmail.com'}>`,
         to: to,
         ...template
       };
@@ -227,6 +235,50 @@ class EmailService {
   async sendCancellationEmail(email, name, date, time) {
     const template = this.getCancellationTemplate(name, date, time);
     return await this.sendEmail(email, template);
+  }
+
+  // Send generic email (for account updates, alerts, etc.)
+  async sendGenericEmail(email, subject, content) {
+    try {
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #e67e22 0%, #d35400 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px; white-space: pre-wrap; }
+            .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Eswari Physiotherapy</h1>
+            </div>
+            <div class="content">
+              ${content.replace(/\n/g, '<br>')}
+            </div>
+            <div class="footer">
+              <p>© 2024 Eswari Physiotherapy Clinic. All rights reserved.</p>
+              <p>This is an automated email. Please do not reply.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const template = {
+        subject: subject,
+        html: htmlContent
+      };
+
+      return await this.sendEmail(email, template);
+    } catch (error) {
+      console.error('❌ Generic Email Error:', error.message);
+      return false;
+    }
   }
 }
 

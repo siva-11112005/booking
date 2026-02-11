@@ -20,7 +20,7 @@ i18n
   .use(initReactI18next)
   .init({
     resources,
-    fallbackLng: 'en',
+    fallbackLng: 'ta',
     debug: false,
     
     detection: {
@@ -32,7 +32,7 @@ i18n
       escapeValue: false
     },
 
-    lng: localStorage.getItem('language') || 'en'
+    lng: localStorage.getItem('language') || 'ta'
   });
 
 export default i18n;

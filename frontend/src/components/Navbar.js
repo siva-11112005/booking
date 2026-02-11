@@ -1,6 +1,7 @@
 import React, { useContext } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
+import LanguageSelector from './LanguageSelector';
 
 const Navbar = () => {
   const { user, logout } = useContext(AuthContext);
@@ -52,6 +53,11 @@ const Navbar = () => {
             <Link to="/" className="nav-link">
               Home
             </Link>
+            {user && (
+              <Link to="/profile" className="nav-link">
+                Profile
+              </Link>
+            )}
             {user && !user.isAdmin && (
               <>
                 <Link to="/book" className="nav-link">
@@ -67,6 +73,9 @@ const Navbar = () => {
                 Admin Dashboard
               </Link>
             )}
+            <div style={{ marginLeft: '12px' }}>
+              <LanguageSelector />
+            </div>
           </div>
         </div>
       </div>

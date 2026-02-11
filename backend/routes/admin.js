@@ -3,7 +3,9 @@ const router = express.Router();
 const Appointment = require('../models/Appointment');
 const User = require('../models/User');
 const { adminAuth } = require('../middleware/auth');
+const AuditLog = require('../models/AuditLog');
 const { sendBookingConfirmation, sendCancellationNotice } = require('../utils/smsService');
+const BlockedSlot = require('../models/BlockedSlot');
 
 // Get all appointments
 router.get('/appointments', adminAuth, async (req, res) => {
@@ -69,7 +71,7 @@ router.patch('/appointments/:id', adminAuth, async (req, res) => {
 // Get all users
 router.get('/users', adminAuth, async (req, res) => {
   try {
-    const users = await User.find({ isAdmin: false })
+    const users = await User.find({})
       .select('-password')
       .sort({ createdAt: -1 });
     
@@ -117,6 +119,38 @@ router.patch('/users/:id/block', adminAuth, async (req, res) => {
   }
 });
 
+// Toggle admin role
+router.patch('/users/:id/admin', adminAuth, async (req, res) => {
+  try {
+    const { isAdmin } = req.body;
+    const target = await User.findById(req.params.id);
+    if (!target) return res.status(404).json({ message: 'User not found' });
+
+    // Prevent demoting self
+    if (target._id.toString() === req.user._id.toString() && isAdmin === false) {
+      return res.status(400).json({ message: 'You cannot remove your own admin access' });
+    }
+
+    const before = target.isAdmin;
+    target.isAdmin = !!isAdmin;
+    await target.save();
+
+    try {
+      await AuditLog.create({
+        user: req.user._id,
+        type: 'admin_role_change',
+        methodUsed: 'none',
+        details: { targetUser: target._id, name: target.name, from: before, to: target.isAdmin }
+      });
+    } catch (e) { console.warn('⚠️  Audit admin_role_change failed:', e.message); }
+
+    res.json({ message: target.isAdmin ? 'Admin access granted' : 'Admin access removed', user: target });
+  } catch (error) {
+    console.error('Toggle Admin Error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Get dashboard stats
 router.get('/stats', adminAuth, async (req, res) => {
   try {
@@ -144,3 +178,49 @@ router.get('/stats', adminAuth, async (req, res) => {
 });
 
 module.exports = router;
+// ============================================
+// ADMIN BUSY/BLOCKED SLOTS MANAGEMENT
+// ============================================
+router.get('/blocked-slots', adminAuth, async (req, res) => {
+  try {
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ message: 'date query param is required (YYYY-MM-DD)' });
+    const base = new Date(date);
+    const start = new Date(base.setHours(0, 0, 0, 0));
+    const end = new Date(base.setHours(23, 59, 59, 999));
+    const slots = await BlockedSlot.find({ date: { $gte: start, $lt: end } }).sort({ timeSlot: 1 });
+    res.json({ success: true, slots });
+  } catch (error) {
+    console.error('Get Blocked Slots Error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.post('/blocked-slots', adminAuth, async (req, res) => {
+  try {
+    const { date, timeSlot, reason } = req.body;
+    if (!date || !timeSlot) return res.status(400).json({ message: 'date and timeSlot are required' });
+    const d = new Date(date);
+    const blocked = await BlockedSlot.create({ date: d, timeSlot, reason: reason || 'Busy', createdBy: req.user._id });
+    res.status(201).json({ success: true, message: 'Slot blocked', blocked });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'This slot is already blocked for the date' });
+    }
+    console.error('Create Blocked Slot Error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+router.delete('/blocked-slots/:id', adminAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await BlockedSlot.findById(id);
+    if (!existing) return res.status(404).json({ message: 'Blocked slot not found' });
+    await BlockedSlot.deleteOne({ _id: id });
+    res.json({ success: true, message: 'Slot unblocked' });
+  } catch (error) {
+    console.error('Delete Blocked Slot Error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});

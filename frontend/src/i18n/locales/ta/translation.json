@@ -16,7 +16,8 @@
     "error": "பிழை",
     "success": "வெற்றி",
     "warning": "எச்சரிக்கை",
-    "info": "தகவல்"
+    "info": "தகவல்",
+    "close": "மூடு"
   },
   
   "header": {
@@ -62,9 +63,32 @@
     "paymentRequired": "கட்டணம் தேவை",
     "payNow": "இப்போது செலுத்து",
     "payLater": "கிளினிக்கில் செலுத்து",
-    "consultationFee": "ஆலோசனை கட்டணம்"
+    "consultationFee": "ஆலோசனை கட்டணம்",
+    "bookingClosed": "முன்பதிவு மூடப்பட்டது",
+    "closesNote": "தொடக்கம் முன் 30 நிமிடங்களில் மூடப்படும்",
+    "todayCutoff": "இன்றைய இடங்கள் தொடங்குவதற்கு 30 நிமிடங்கள் முன் மூடப்படும்",
+    "blocked": "தடைசெய்யப்பட்டது"
   },
-  
+
+  "admin": {
+    "dashboard": "நிர்வாக டாஷ்போர்டு",
+    "totalPatients": "மொத்த நோயாளிகள்",
+    "todayAppointments": "இன்றைய சந்திப்புகள்",
+    "pendingApprovals": "நிலுவையில் உள்ள உறுதிப்பாடுகள்",
+    "totalBookings": "மொத்த முன்பதிவுகள்",
+    "appointments": "சந்திப்புகள்",
+    "users": "பயனர்கள்",
+    "slots": "நேரங்கள்",
+    "verify": "உறுதிப்படுத்து",
+    "block": "தடை",
+    "unblock": "தடை நீக்கு",
+    "cancelAll": "அனைத்தையும் ரத்து செய்",
+    "sendSms": "SMS அனுப்பு",
+    "cancelForDate": "குறிப்பிட்ட தேதிக்கான அனைத்து சந்திப்புகளையும் ரத்து செய்",
+    "cancelAllSendSms": "அனைத்தையும் ரத்து செய்து SMS அனுப்பு",
+    "loadingAppointments": "சந்திப்புகள் ஏற்றப்படுகிறது..."
+  }
+  ,
   "auth": {
     "loginTitle": "உங்கள் கணக்கில் உள்நுழையவும்",
     "registerTitle": "புதிய கணக்கை உருவாக்கவும்",
@@ -84,6 +108,18 @@
     "invalidOtp": "தவறான OTP",
     "phoneRequired": "இந்திய மொபைல் எண்கள் மட்டுமே",
     "passwordMin": "குறைந்தபட்சம் 8 எழுத்துக்கள்"
+  },
+
+  "appointments": {
+    "reason": "காரணம்",
+    "status": "நிலை",
+    "date": "தேதி",
+    "time": "நேரம்",
+    "completed": "முடிந்தது",
+    "cancelled": "ரத்து செய்யப்பட்டது",
+    "pending": "நிலுவை",
+    "confirmed": "உறுதிப்படுத்தப்பட்டது",
+    "painType": "நிலை"
   },
   
   "payment": {

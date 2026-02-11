@@ -16,7 +16,8 @@
     "error": "Error",
     "success": "Success",
     "warning": "Warning",
-    "info": "Information"
+    "info": "Information",
+    "close": "Close"
   },
   
   "header": {
@@ -62,7 +63,10 @@
     "paymentRequired": "Payment Required",
     "payNow": "Pay Now",
     "payLater": "Pay at Clinic",
-    "consultationFee": "Consultation Fee"
+    "consultationFee": "Consultation Fee",
+    "bookingClosed": "Booking Closed",
+    "closesNote": "Closes 30 minutes before start",
+    "blocked": "Blocked"
   },
   
   "auth": {
@@ -105,6 +109,7 @@
     "cancelled": "Cancelled",
     "cancelAppointment": "Cancel Appointment",
     "reschedule": "Reschedule",
+    "reason": "Reason",
     "noAppointments": "No appointments yet",
     "cancelConfirm": "Are you sure you want to cancel this appointment?",
     "paymentStatus": "Payment Status",
@@ -140,6 +145,7 @@
     "monthRevenue": "This Month",
     "appointments": "Appointments",
     "users": "Users",
+    "slots": "Slots",
     "reports": "Reports",
     "settings": "Settings",
     "verify": "Verify",
@@ -147,7 +153,10 @@
     "unblock": "Unblock",
     "cancelAll": "Cancel All",
     "sendSms": "Send SMS",
-    "exportData": "Export Data"
+    "exportData": "Export Data",
+    "cancelForDate": "Cancel All Appointments for a Date",
+    "cancelAllSendSms": "Cancel All & Send SMS",
+    "loadingAppointments": "Loading appointments..."
   },
   
   "footer": {

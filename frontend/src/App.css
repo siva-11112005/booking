@@ -1,3 +1,66 @@
+.screen-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeInScale 120ms ease-out;
+}
+
+.hover-modal {
+  width: 560px;
+  max-width: 92vw;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 24px 48px rgba(0,0,0,0.18);
+  border: 1px solid #eaecef;
+  padding: 20px 22px;
+  position: relative;
+}
+.hover-modal .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.hover-modal .close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: #dc3545; /* red */
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hover-modal .close-btn:hover {
+  background: #c82333; /* darker red */
+}
+.hover-modal .modal-title {
+  font-size: 1.15em;
+  font-weight: 700;
+  color: #333;
+}
+.hover-modal .modal-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.hover-modal .modal-row {
+  font-size: 0.98em;
+}
+.hover-modal .modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
 * {
@@ -359,6 +422,8 @@ body {
   cursor: pointer;
   transition: all 0.4s;
   border: 3px solid transparent;
+  position: relative;
+  min-height: 170px;
 }
 
 .slot-card.available {
@@ -367,8 +432,8 @@ body {
 }
 
 .slot-card.available:hover {
-  transform: scale(1.08);
   box-shadow: 0 15px 40px rgba(40, 167, 69, 0.3);
+  border-color: #28a745;
 }
 
 .slot-card.booked {
@@ -401,6 +466,68 @@ body {
   font-size: 1em;
   color: #666;
   font-weight: 600;
+}
+
+/* Overlay details panel inside a slot card to avoid layout shifts */
+.slot-details {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  border: 1px solid #eee;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+  animation: fadeInUp 220ms ease-out;
+}
+
+/* Compact popover for hover details */
+.slot-popover {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  max-width: 260px;
+  background: #ffffff;
+  border: 1px solid #eaecef;
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.12);
+  padding: 12px 14px;
+  text-align: left;
+  animation: fadeInScale 160ms ease-out;
+}
+.slot-popover::after {
+  content: '';
+  position: absolute;
+  right: 18px;
+  top: -7px;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 7px solid #ffffff;
+  filter: drop-shadow(0 -1px 0 #eaecef);
+}
+.slot-popover .popover-row {
+  font-size: 0.95em;
+  margin-bottom: 6px;
+}
+.slot-popover .popover-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .login-prompt {
@@ -463,6 +590,8 @@ body {
   border-radius: 15px;
   border-left: 6px solid #ffc107;
   transition: all 0.3s;
+  position: relative;
+  min-height: 140px;
 }
 
 .appointment-item.verified {

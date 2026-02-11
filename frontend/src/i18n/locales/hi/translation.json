@@ -7,7 +7,9 @@
     "submit": "जमा करें",
     "cancel": "रद्द करें",
     "confirm": "पुष्टि करें",
-    "loading": "लोड हो रहा है..."
+    "loading": "लोड हो रहा है...",
+    "close": "बंद करें",
+    "info": "जानकारी"
   },
   
   "header": {
@@ -20,6 +22,54 @@
   "home": {
     "heroTitle": "विशेषज्ञ फिजियोथेरेपी देखभाल",
     "heroDescription": "पीठ दर्द, गर्दन दर्द, घुटने का दर्द, कंधे का दर्द और खेल की चोटों के लिए विशेष उपचार",
-    "bookNow": "अभी अपॉइंटमेंट बुक करें"
+    "bookNow": "अभी अपॉइंटमेंट बुक करें",
+    "viewSlots": "उपलब्ध समय देखें",
+    "treatments": "फिजियोथेरेपी उपचार",
+    "specializedTreatment": "आपकी आवश्यकताओं के अनुसार विशेष उपचार और पुनर्वास कार्यक्रम"
+  },
+  "booking": {
+    "title": "अपनी अपॉइंटमेंट बुक करें",
+    "selectTime": "समय चुनें",
+    "morningSlots": "सुबह के समय",
+    "afternoonSlots": "दोपहर के समय",
+    "lunchBreak": "दोपहर का भोजन अवकाश",
+    "available": "उपलब्ध",
+    "booked": "बुक किया गया",
+    "closedSunday": "रविवार को क्लिनिक बंद रहता है",
+    "duration": "50 मिनट सत्र",
+    "bookingClosed": "बुकिंग बंद",
+    "closesNote": "शुरू होने से 30 मिनट पहले बंद होगा",
+    "blocked": "ब्लॉक किया गया"
+  }
+  ,
+  "appointments": {
+    "reason": "कारण",
+    "status": "स्थिति",
+    "date": "तारीख",
+    "time": "समय",
+    "completed": "पूर्ण",
+    "cancelled": "रद्द",
+    "pending": "लंबित",
+    "confirmed": "पुष्ट",
+    "painType": "स्थिति"
+  }
+  ,
+  "admin": {
+    "dashboard": "एडमिन डैशबोर्ड",
+    "totalPatients": "कुल मरीज",
+    "todayAppointments": "आज की अपॉइंटमेंट्स",
+    "pendingApprovals": "लंबित अनुमोदन",
+    "totalBookings": "कुल बुकिंग",
+    "appointments": "अपॉइंटमेंट्स",
+    "users": "उपयोगकर्ता",
+    "slots": "समय स्लॉट",
+    "verify": "सत्यापित करें",
+    "block": "ब्लॉक",
+    "unblock": "अनब्लॉक",
+    "cancelAll": "सभी रद्द करें",
+    "sendSms": "SMS भेजें",
+    "cancelForDate": "किसी तिथि के लिए सभी अपॉइंटमेंट्स रद्द करें",
+    "cancelAllSendSms": "सभी रद्द करें और SMS भेजें",
+    "loadingAppointments": "अपॉइंटमेंट्स लोड हो रहे हैं..."
   }
 }

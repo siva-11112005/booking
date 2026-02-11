@@ -1,11 +1,24 @@
+const path = require('path');
+const dotenv = require('dotenv');
+
+// Load environment variables BEFORE importing any modules that read from process.env
+// Try default .env, and if not found, attempt parent directory (project root)
+const result = dotenv.config();
+if (result.error) {
+  try {
+    dotenv.config({ path: path.resolve(__dirname, '../.env') });
+  } catch (_) {
+    // ignore; environment may come from the process
+  }
+}
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const dotenv = require('dotenv');
-const path = require('path');
-
-// Load environment variables
-dotenv.config();
+const User = require('./models/User');
+const Appointment = require('./models/Appointment');
+const smsGatewayService = require('./utils/smsGatewayService');
+const emailService = require('./utils/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 10000; // Render uses port 10000 by default
@@ -326,6 +339,186 @@ const startServer = async () => {
     // Set keep-alive timeout for Render
     server.keepAliveTimeout = 120000; // 120 seconds
     server.headersTimeout = 120000;
+
+    // ============================================
+    // BOOTSTRAP ADMIN ACCESS
+    // ============================================
+    try {
+      const adminPhone = (process.env.ADMIN_PHONE || '').trim();
+      const adminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+      if (adminPhone || adminEmail) {
+        const query = { $or: [] };
+        if (adminPhone) query.$or.push({ phone: adminPhone });
+        if (adminEmail) query.$or.push({ email: adminEmail });
+        if (query.$or.length > 0) {
+          const adminUser = await User.findOne(query);
+          if (adminUser && !adminUser.isAdmin) {
+            adminUser.isAdmin = true;
+            await adminUser.save();
+            console.log('👑 Elevated user to admin:', adminUser.name, adminUser.phone || adminUser.email);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️  Admin bootstrap failed:', e.message);
+    }
+
+    // ============================================
+    // AUTO-CLEANUP PAST APPOINTMENTS (no notifications)
+    // ============================================
+    const parseEndTime = (timeSlot) => {
+      // Example: "10:00 AM - 10:50 AM" => end part "10:50 AM"
+      try {
+        const parts = String(timeSlot).split('-');
+        const endPart = parts[1] ? parts[1].trim() : null;
+        if (!endPart) return null;
+        const match = endPart.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (!match) return null;
+        let hours = parseInt(match[1], 10);
+        const minutes = parseInt(match[2], 10);
+        const ampm = match[3].toUpperCase();
+        if (ampm === 'PM' && hours !== 12) hours += 12;
+        if (ampm === 'AM' && hours === 12) hours = 0;
+        return { hours, minutes };
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const cleanupPastAppointments = async () => {
+      try {
+        const now = new Date();
+        // Fetch appointments for today and earlier
+        const candidates = await Appointment.find({ date: { $lte: now }, status: { $in: ['pending', 'confirmed'] } }).lean();
+        if (!candidates.length) return;
+
+        const toDeleteIds = [];
+        for (const apt of candidates) {
+          const end = parseEndTime(apt.timeSlot);
+          if (!end) continue;
+          const endTime = new Date(apt.date);
+          endTime.setHours(end.hours, end.minutes, 0, 0);
+          if (endTime < now) {
+            toDeleteIds.push(apt._id);
+          }
+        }
+
+        if (toDeleteIds.length > 0) {
+          const result = await Appointment.deleteMany({ _id: { $in: toDeleteIds } });
+          console.log(`🧹 Auto-cleaned ${result.deletedCount} past appointments (no notifications).`);
+        }
+      } catch (e) {
+        console.warn('⚠️  Auto-clean appointments failed:', e.message);
+      }
+    };
+
+    // Run every 5 minutes
+    setInterval(cleanupPastAppointments, 5 * 60 * 1000);
+    // Also run once shortly after startup
+    setTimeout(cleanupPastAppointments, 30 * 1000);
+
+    // ============================================
+    // REMINDER JOB: T-24h and T-2h (confirmed only)
+    // ============================================
+    const parseStartTime = (timeSlot) => {
+      // "10:00 AM - 10:50 AM" => start part "10:00 AM"
+      try {
+        const startPart = String(timeSlot).split('-')[0].trim();
+        const match = startPart.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (!match) return null;
+        let hours = parseInt(match[1], 10);
+        const minutes = parseInt(match[2], 10);
+        const ampm = match[3].toUpperCase();
+        if (ampm === 'PM' && hours !== 12) hours += 12;
+        if (ampm === 'AM' && hours === 12) hours = 0;
+        return { hours, minutes };
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const sendReminders = async () => {
+      try {
+        const now = new Date();
+        // Consider appointments today and next 2 days (buffer)
+        const upper = new Date(now);
+        upper.setDate(upper.getDate() + 2);
+
+        const candidates = await Appointment.find({
+          status: 'confirmed',
+          date: { $gte: now, $lte: upper }
+        }).populate('user', 'name phone email').lean();
+
+        if (!candidates.length) return;
+
+        const idsToUpdate24 = [];
+        const idsToUpdate2 = [];
+
+        for (const apt of candidates) {
+          const start = parseStartTime(apt.timeSlot);
+          if (!start) continue;
+          const startDT = new Date(apt.date);
+          startDT.setHours(start.hours, start.minutes, 0, 0);
+
+          const diffMs = startDT.getTime() - now.getTime();
+          const diffHours = diffMs / (1000 * 60 * 60);
+
+          // Within 24h window: send once when between 23.5 and 24.5 hours left
+          if (!apt.reminder24Sent && diffHours <= 24.5 && diffHours >= 23.5) {
+            const dateStr = startDT.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            const msg = `Reminder: Your appointment at Eswari Physiotherapy is tomorrow (${dateStr}) at ${apt.timeSlot.split('-')[0].trim()}. Please arrive 10 minutes early.`;
+            try {
+              if (apt.user?.phone) await smsGatewayService.sendSMS(apt.user.phone, msg);
+              if (apt.user?.email) await emailService.sendGenericEmail(
+                apt.user.email,
+                'Appointment Reminder - Eswari Physiotherapy',
+                `Hi ${apt.user?.name || 'Patient'},\n\nThis is a friendly reminder for your appointment tomorrow.\n\nDate: ${dateStr}\nTime: ${apt.timeSlot.split('-')[0].trim()}\n\nPlease arrive 10 minutes early.\n\nContact: ${process.env.ADMIN_PHONE || '+919524350214'}`
+              );
+              idsToUpdate24.push(apt._id);
+            } catch (e) {
+              console.warn('⚠️  24h reminder failed:', e.message);
+            }
+          }
+
+          // Within 2h window: send once when between 1.5 and 2.5 hours left
+          if (!apt.reminder2Sent && diffHours <= 2.5 && diffHours >= 1.5) {
+            const dateStr = startDT.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            const msg = `Reminder: Your appointment at Eswari Physiotherapy is today (${dateStr}) at ${apt.timeSlot.split('-')[0].trim()}. See you soon!`;
+            try {
+              if (apt.user?.phone) await smsGatewayService.sendSMS(apt.user.phone, msg);
+              if (apt.user?.email) await emailService.sendGenericEmail(
+                apt.user.email,
+                'Appointment Reminder - Eswari Physiotherapy',
+                `Hi ${apt.user?.name || 'Patient'},\n\nYour appointment is in about 2 hours.\n\nDate: ${dateStr}\nTime: ${apt.timeSlot.split('-')[0].trim()}\n\nPlease arrive 10 minutes early.\n\nContact: ${process.env.ADMIN_PHONE || '+919524350214'}`
+              );
+              idsToUpdate2.push(apt._id);
+            } catch (e) {
+              console.warn('⚠️  2h reminder failed:', e.message);
+            }
+          }
+        }
+
+        if (idsToUpdate24.length || idsToUpdate2.length) {
+          const bulkOps = [];
+          for (const id of idsToUpdate24) {
+            bulkOps.push({ updateOne: { filter: { _id: id }, update: { $set: { reminder24Sent: true } } } });
+          }
+          for (const id of idsToUpdate2) {
+            bulkOps.push({ updateOne: { filter: { _id: id }, update: { $set: { reminder2Sent: true } } } });
+          }
+          if (bulkOps.length) {
+            await Appointment.bulkWrite(bulkOps);
+            console.log(`🔔 Sent reminders - 24h: ${idsToUpdate24.length}, 2h: ${idsToUpdate2.length}`);
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️  Reminder job failed:', e.message);
+      }
+    };
+
+    // Run reminder job every 5 minutes, and once after startup
+    setInterval(sendReminders, 5 * 60 * 1000);
+    setTimeout(sendReminders, 60 * 1000);
 
     // ============================================
     // GRACEFUL SHUTDOWN

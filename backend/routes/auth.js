@@ -7,6 +7,7 @@ const OTP = require('../models/OTP');
 const { auth } = require('../middleware/auth');
 const notificationService = require('../utils/notificationService');
 const emailService = require('../utils/emailService');
+const AuditLog = require('../models/AuditLog');
 
 // ============================================
 // HELPER FUNCTIONS
@@ -43,7 +44,7 @@ const validateEmail = (email) => {
 };
 
 // Check OTP limit per day
-const checkOTPLimit = async (identifier) => {
+const checkOTPLimit = async (identifier, isEmail = false) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
@@ -51,7 +52,9 @@ const checkOTPLimit = async (identifier) => {
   tomorrow.setDate(tomorrow.getDate() + 1);
   
   const query = {};
-  if (identifier.includes('@')) {
+  const isEmailIdentifier = identifier.includes('@');
+  
+  if (isEmailIdentifier || isEmail) {
     query.email = identifier;
   } else {
     query.phone = identifier;
@@ -65,7 +68,14 @@ const checkOTPLimit = async (identifier) => {
     }
   });
   
-  const maxOTPPerDay = parseInt(process.env.MAX_OTP_PER_DAY) || 5;
+  // Use email-specific limit if identifier is email
+  let maxOTPPerDay;
+  if (isEmailIdentifier || isEmail) {
+    maxOTPPerDay = parseInt(process.env.MAX_EMAIL_OTP_PER_DAY) || 10;
+  } else {
+    maxOTPPerDay = parseInt(process.env.MAX_OTP_PER_DAY) || 5;
+  }
+  
   return count < maxOTPPerDay;
 };
 
@@ -85,11 +95,19 @@ const cleanExpiredOTPs = async (identifier) => {
 };
 
 // ============================================
-// SEND OTP FOR REGISTRATION (SMS or Email)
+// SEND OTP FOR REGISTRATION (SMS primary, Email option)
 // ============================================
-router.post('/send-otp', async (req, res) => {
+const rateLimit = require('../middleware/rateLimit');
+router.post('/send-otp', rateLimit({ windowMs: 300000, maxPerIdentifier: 5 }), async (req, res) => {
   try {
-    let { phone, email, preferEmail = false } = req.body;
+    let { phone, email, sendVia = 'sms' } = req.body; // sendVia: 'sms' (default for registration) or 'email'
+    
+    // Validate sendVia parameter
+    if (!['sms', 'email'].includes(sendVia)) {
+      return res.status(400).json({ 
+        message: 'sendVia must be either "sms" or "email"' 
+      });
+    }
     
     // Must have either phone or email
     if (!phone && !email) {
@@ -102,8 +120,14 @@ router.post('/send-otp', async (req, res) => {
     let formattedPhone = '';
     let formattedEmail = '';
     
-    // If using phone
-    if (phone && !preferEmail) {
+    // If using SMS
+    if (sendVia === 'sms') {
+      if (!phone) {
+        return res.status(400).json({ 
+          message: 'Phone number is required for SMS OTP' 
+        });
+      }
+      
       formattedPhone = formatPhoneNumber(phone);
       identifier = formattedPhone;
       
@@ -122,9 +146,16 @@ router.post('/send-otp', async (req, res) => {
       }
     }
     
-    // If using email
-    if (email) {
+    // If using Email
+    if (sendVia === 'email') {
+      if (!email) {
+        return res.status(400).json({ 
+          message: 'Email is required for email OTP' 
+        });
+      }
+      
       formattedEmail = email.trim().toLowerCase();
+      identifier = formattedEmail;
       
       if (!validateEmail(formattedEmail)) {
         return res.status(400).json({ 
@@ -132,34 +163,36 @@ router.post('/send-otp', async (req, res) => {
         });
       }
       
-      if (preferEmail) {
-        identifier = formattedEmail;
-        
-        // Check if email already registered
-        const existingUser = await User.findOne({ email: formattedEmail });
-        if (existingUser && existingUser.isVerified) {
-          return res.status(400).json({ 
-            message: 'This email is already registered. Please login instead.' 
-          });
-        }
+      // Check if email already registered
+      const existingUser = await User.findOne({ email: formattedEmail });
+      if (existingUser && existingUser.isVerified) {
+        return res.status(400).json({ 
+          message: 'This email is already registered. Please login instead.' 
+        });
+      }
+      
+      // Also store phone if provided for future use
+      if (phone) {
+        formattedPhone = formatPhoneNumber(phone);
       }
     }
     
     // Clean expired OTPs
     await cleanExpiredOTPs(identifier);
     
-    // Check daily OTP limit
-    const canSendOTP = await checkOTPLimit(identifier);
+    // Check daily OTP limit (email has 10 limit, SMS has 5 limit)
+    const canSendOTP = await checkOTPLimit(identifier, sendVia === 'email');
     if (!canSendOTP) {
+      const limitType = sendVia === 'email' ? '10' : '5';
       return res.status(429).json({ 
-        message: `Maximum OTP limit reached for today (${process.env.MAX_OTP_PER_DAY || 5} OTPs). Please try again tomorrow.` 
+        message: `Maximum OTP limit (${limitType} per day) reached for today via ${sendVia.toUpperCase()}. Please try again tomorrow.` 
       });
     }
     
     // Check for recent OTP (prevent spam)
-    const recentOTPQuery = {};
-    if (formattedPhone) recentOTPQuery.phone = formattedPhone;
-    if (formattedEmail && preferEmail) recentOTPQuery.email = formattedEmail;
+    const recentOTPQuery = sendVia === 'email' ? 
+      { email: formattedEmail } : 
+      { phone: formattedPhone };
     
     const recentOTP = await OTP.findOne({
       ...recentOTPQuery,
@@ -182,34 +215,38 @@ router.post('/send-otp', async (req, res) => {
       otp,
       type: 'registration',
       expiresAt,
-      method: preferEmail ? 'email' : 'sms'
+      method: sendVia
     };
     
-    if (formattedPhone) otpData.phone = formattedPhone;
-    if (formattedEmail) otpData.email = formattedEmail;
+    if (sendVia === 'email') {
+      otpData.email = formattedEmail;
+      if (formattedPhone) otpData.phone = formattedPhone;
+    } else {
+      otpData.phone = formattedPhone;
+      if (formattedEmail) otpData.email = formattedEmail;
+    }
     
     await OTP.create(otpData);
     
     // Send OTP via notification service
     const result = await notificationService.sendOTP(
-      formattedPhone, 
-      formattedEmail, 
+      sendVia === 'sms' ? formattedPhone : '', 
+      sendVia === 'email' ? formattedEmail : '', 
       'User', 
       otp, 
-      preferEmail
+      sendVia === 'email'
     );
     
-    console.log(`🔐 OTP generated for ${identifier}: ${otp}`);
+    console.log(`🔐 OTP generated for ${identifier} via ${sendVia.toUpperCase()}: ${otp}`);
     
     res.json({ 
       success: true,
-      message: result.method === 'email' 
-        ? 'OTP sent successfully to your email' 
-        : result.method === 'sms'
-        ? 'OTP sent successfully to your mobile number'
-        : 'OTP generated (check console for development)',
-      method: result.method,
-      identifier: preferEmail ? formattedEmail : formattedPhone,
+      message: sendVia === 'email' 
+        ? `✅ OTP sent successfully to your email (${formattedEmail})` 
+        : `✅ OTP sent successfully to your mobile number (${formattedPhone})`,
+      method: sendVia,
+      identifier: identifier,
+      alternativeMethod: sendVia === 'sms' ? 'email' : 'sms',
       expiryTime: process.env.OTP_VALIDITY_MINUTES || 5
     });
     
@@ -519,11 +556,18 @@ router.post('/login', async (req, res) => {
 });
 
 // ============================================
-// FORGOT PASSWORD - SEND OTP (Email preferred)
+// FORGOT PASSWORD - SEND OTP (Email or SMS options)
 // ============================================
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', rateLimit({ windowMs: 300000, maxPerIdentifier: 5 }), async (req, res) => {
   try {
-    let { phone, email, preferEmail = true } = req.body; // Default to email for password reset
+    let { phone, email, sendVia = 'email' } = req.body; // sendVia: 'email' or 'sms'
+    
+    // Validate sendVia parameter
+    if (!['email', 'sms'].includes(sendVia)) {
+      return res.status(400).json({ 
+        message: 'sendVia must be either "email" or "sms"' 
+      });
+    }
     
     // Must have either phone or email
     if (!phone && !email) {
@@ -540,7 +584,6 @@ router.post('/forgot-password', async (req, res) => {
     // Check by email first if provided
     if (email) {
       formattedEmail = email.trim().toLowerCase();
-      identifier = formattedEmail;
       
       if (!validateEmail(formattedEmail)) {
         return res.status(400).json({ 
@@ -554,7 +597,6 @@ router.post('/forgot-password', async (req, res) => {
     // If no email or user not found by email, check phone
     if (!user && phone) {
       formattedPhone = formatPhoneNumber(phone);
-      identifier = formattedPhone;
       
       if (!validateIndianPhone(formattedPhone)) {
         return res.status(400).json({ 
@@ -576,6 +618,19 @@ router.post('/forgot-password', async (req, res) => {
     formattedEmail = user.email || formattedEmail;
     formattedPhone = user.phone || formattedPhone;
     
+    // Validate that user has the contact method they're requesting
+    if (sendVia === 'email' && !formattedEmail) {
+      return res.status(400).json({ 
+        message: 'Email not available for this account' 
+      });
+    }
+    
+    if (sendVia === 'sms' && !formattedPhone) {
+      return res.status(400).json({ 
+        message: 'Phone number not available for this account' 
+      });
+    }
+    
     // Check if user is blocked
     if (user.isBlocked) {
       return res.status(403).json({ 
@@ -583,21 +638,25 @@ router.post('/forgot-password', async (req, res) => {
       });
     }
     
+    // Determine identifier for OTP limit check
+    identifier = sendVia === 'email' ? formattedEmail : formattedPhone;
+    
     // Clean expired OTPs
     await cleanExpiredOTPs(identifier);
     
-    // Check OTP limit
-    const canSendOTP = await checkOTPLimit(identifier);
+    // Check OTP limit (email has 10 limit, sms has 5 limit)
+    const canSendOTP = await checkOTPLimit(identifier, sendVia === 'email');
     if (!canSendOTP) {
+      const limitType = sendVia === 'email' ? '10' : '5';
       return res.status(429).json({ 
-        message: `Maximum OTP limit reached for today. Please try again tomorrow.` 
+        message: `Maximum OTP limit (${limitType} per day) reached for today via ${sendVia}. Please try again tomorrow.` 
       });
     }
     
     // Check for recent OTP
-    const recentOTPQuery = {};
-    if (formattedPhone) recentOTPQuery.phone = formattedPhone;
-    if (formattedEmail) recentOTPQuery.email = formattedEmail;
+    const recentOTPQuery = sendVia === 'email' ? 
+      { email: formattedEmail } : 
+      { phone: formattedPhone };
     
     const recentOTP = await OTP.findOne({
       ...recentOTPQuery,
@@ -620,34 +679,36 @@ router.post('/forgot-password', async (req, res) => {
       otp,
       type: 'password_reset',
       expiresAt,
-      method: formattedEmail && preferEmail ? 'email' : 'sms'
+      method: sendVia
     };
     
-    if (formattedPhone) otpData.phone = formattedPhone;
-    if (formattedEmail) otpData.email = formattedEmail;
+    if (sendVia === 'email') {
+      otpData.email = formattedEmail;
+    } else {
+      otpData.phone = formattedPhone;
+    }
     
     await OTP.create(otpData);
     
-    // Send OTP via notification service (prefer email for password reset)
+    // Send OTP via notification service
     const result = await notificationService.sendOTP(
-      formattedPhone, 
-      formattedEmail, 
+      sendVia === 'sms' ? formattedPhone : '', 
+      sendVia === 'email' ? formattedEmail : '', 
       user.name, 
       otp, 
-      preferEmail && !!formattedEmail
+      sendVia === 'email'
     );
     
-    console.log(`🔐 Password reset OTP for ${identifier}: ${otp}`);
+    console.log(`🔐 Password reset OTP for ${identifier} via ${sendVia}: ${otp}`);
     
     res.json({ 
       success: true,
-      message: result.method === 'email'
-        ? 'OTP sent to your registered email'
-        : result.method === 'sms'
-        ? 'OTP sent to your registered phone number'
-        : 'OTP generated (check console)',
-      method: result.method,
-      identifier: result.method === 'email' ? formattedEmail : formattedPhone,
+      message: sendVia === 'email'
+        ? `✅ OTP sent to your registered email (${formattedEmail}). You can also use SMS if preferred.`
+        : `✅ OTP sent to your registered phone (${formattedPhone}). You can also use Email if preferred.`,
+      method: sendVia,
+      identifier: sendVia === 'email' ? formattedEmail : formattedPhone,
+      alternativeMethod: sendVia === 'email' ? 'sms' : 'email',
       expiryTime: process.env.OTP_VALIDITY_MINUTES || 5
     });
     
@@ -806,7 +867,7 @@ router.post('/reset-password', async (req, res) => {
 // ============================================
 // RESEND OTP
 // ============================================
-router.post('/resend-otp', async (req, res) => {
+router.post('/resend-otp', rateLimit({ windowMs: 300000, maxPerIdentifier: 5 }), async (req, res) => {
   try {
     let { phone, email, type = 'registration', preferEmail = false } = req.body;
     
@@ -1003,11 +1064,23 @@ router.put('/update-profile', auth, async (req, res) => {
     }
     
     // Update user
+    const before = await User.findById(userId).lean();
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       updates,
       { new: true, runValidators: true }
     );
+
+    // Audit: profile_update
+    try {
+      const changed = {};
+      if (updates.name && updates.name !== before.name) changed.name = { from: before.name, to: updates.name };
+      if ('email' in updates && updates.email !== before.email) changed.email = { from: before.email || null, to: updates.email || null };
+      if ('phone' in updates && updates.phone !== before.phone) changed.phone = { from: before.phone || null, to: updates.phone || null };
+      if (Object.keys(changed).length > 0) {
+        await AuditLog.create({ user: userId, type: 'profile_update', methodUsed: 'none', details: changed });
+      }
+    } catch (e) { console.warn('⚠️  Audit profile_update failed:', e.message); }
     
     res.json({
       success: true,
@@ -1076,6 +1149,11 @@ router.post('/change-password', auth, async (req, res) => {
     user.passwordChangedAt = new Date();
     await user.save();
     
+    // Audit: password_change
+    try {
+      await AuditLog.create({ user: user._id, type: 'password_change', methodUsed: 'none', details: { via: 'change_password' } });
+    } catch (e) { console.warn('⚠️  Audit password_change failed:', e.message); }
+
     // Send confirmation email if available
     if (user.email) {
       emailService.sendEmail(user.email, {
@@ -1100,6 +1178,132 @@ router.post('/change-password', auth, async (req, res) => {
     res.status(500).json({ 
       message: 'Failed to change password' 
     });
+  }
+});
+
+// ============================================
+// SEND OTP FOR CHANGE (password or name) - Logged in
+// ============================================
+router.post('/send-change-otp', auth, rateLimit({ windowMs: 300000, maxPerIdentifier: 5 }), async (req, res) => {
+  try {
+    const { target = 'password', sendVia = 'email' } = req.body; // target: 'password'
+
+    if (target !== 'password') {
+      return res.status(400).json({ message: 'OTP sending is only supported for password changes' });
+    }
+    if (!['email', 'sms'].includes(sendVia)) {
+      return res.status(400).json({ message: 'sendVia must be either "email" or "sms"' });
+    }
+
+    const user = req.user;
+    const identifier = sendVia === 'email' ? user.email : user.phone;
+    if (!identifier) {
+      return res.status(400).json({ message: `No ${sendVia} on file for this account` });
+    }
+
+    // Clean expired OTPs
+    await cleanExpiredOTPs(identifier);
+
+    // Check OTP limit
+    const canSendOTP = await checkOTPLimit(identifier, sendVia === 'email');
+    if (!canSendOTP) {
+      const limitType = sendVia === 'email' ? '10' : '5';
+      return res.status(429).json({ message: `Maximum OTP limit (${limitType} per day) reached for today via ${sendVia}. Please try again tomorrow.` });
+    }
+
+    // Prevent spamming
+    const recentOTPQuery = sendVia === 'email' ? { email: user.email } : { phone: user.phone };
+    const recentOTP = await OTP.findOne({
+      ...recentOTPQuery,
+      type: 'change_password',
+      createdAt: { $gt: new Date(Date.now() - 60000) }
+    });
+    if (recentOTP) {
+      return res.status(429).json({ message: 'Please wait 1 minute before requesting a new OTP' });
+    }
+
+    // Generate and save OTP
+    const otp = generateOTP();
+    const expiresAt = new Date(Date.now() + (parseInt(process.env.OTP_VALIDITY_MINUTES) || 5) * 60000);
+    const otpData = {
+      otp,
+      type: 'change_password',
+      expiresAt,
+      method: sendVia
+    };
+    if (sendVia === 'email') otpData.email = user.email; else otpData.phone = user.phone;
+    await OTP.create(otpData);
+
+    // Send via notification service
+    await notificationService.sendOTP(
+      sendVia === 'sms' ? user.phone : '',
+      sendVia === 'email' ? user.email : '',
+      user.name,
+      otp,
+      sendVia === 'email'
+    );
+
+    return res.json({ success: true, message: `OTP sent via ${sendVia}`, method: sendVia, expiryTime: process.env.OTP_VALIDITY_MINUTES || 5 });
+  } catch (error) {
+    console.error('Send Change OTP Error:', error);
+    res.status(500).json({ message: 'Failed to send OTP' });
+  }
+});
+
+// ============================================
+// CONFIRM CHANGE (password or name) with OTP - Logged in
+// ============================================
+router.post('/confirm-change', auth, async (req, res) => {
+  try {
+    const { target = 'password', otp, newPassword } = req.body;
+    if (target !== 'password') {
+      return res.status(400).json({ message: 'This endpoint only confirms password changes via OTP' });
+    }
+    if (!otp || !/^\d{6}$/.test(otp)) {
+      return res.status(400).json({ message: 'Please provide a valid 6-digit OTP' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const type = 'change_password';
+    const otpQuery = {
+      otp,
+      type,
+      expiresAt: { $gt: new Date() }
+    };
+    if (user.email) otpQuery.email = user.email;
+    if (user.phone) otpQuery.phone = user.phone;
+
+    const otpRecord = await OTP.findOne(otpQuery).sort({ createdAt: -1 });
+    if (!otpRecord) {
+      return res.status(400).json({ message: 'Invalid or expired OTP' });
+    }
+
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ message: 'New password must be at least 8 characters' });
+    }
+    const isSame = await bcrypt.compare(newPassword, user.password);
+    if (isSame) return res.status(400).json({ message: 'New password cannot be same as current' });
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.passwordChangedAt = new Date();
+
+    await user.save();
+    // Delete used OTPs for this type
+    const delQuery = { type };
+    if (user.email) delQuery.email = user.email;
+    if (user.phone) delQuery.phone = user.phone;
+    await OTP.deleteMany(delQuery);
+
+    // Audit: password_change via OTP with method detection
+    try {
+      await AuditLog.create({ user: user._id, type: 'password_change', methodUsed: otpQuery.email ? 'email' : 'sms', details: { via: 'otp_confirm_change' } });
+    } catch (e) { console.warn('⚠️  Audit password_change (otp) failed:', e.message); }
+
+    return res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Confirm Change Error:', error);
+    res.status(500).json({ message: 'Failed to confirm change' });
   }
 });
 

@@ -1,15 +1,72 @@
-import React, { useContext, useState, useEffect, useCallback } from 'react';
+import React, { useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import { getAvailableSlots } from '../services/api';
+import { getAvailableSlots, getAllAppointments, getBlockedSlots, updateAppointmentStatus } from '../services/api';
 import Navbar from '../components/Navbar';
 
 const Home = () => {
   const { user } = useContext(AuthContext);
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(false);
+  // Admin detail view state
+  const [adminAppointmentsByTime, setAdminAppointmentsByTime] = useState({});
+  const [adminBlockedByTime, setAdminBlockedByTime] = useState({});
+  const [adminExpandedSlot, setAdminExpandedSlot] = useState(null);
+  // Hover control: dwell to open, cooldown after close to prevent auto re-open
+  const hoverOpenTimer = useRef(null);
+  const [suppressHover, setSuppressHover] = useState(false);
+  const startHoverOpen = (time) => {
+    if (suppressHover) return;
+    // Small dwell delay to avoid accidental opens
+    clearTimeout(hoverOpenTimer.current);
+    hoverOpenTimer.current = setTimeout(() => {
+      setAdminExpandedSlot(time);
+    }, 120);
+  };
+  const cancelHoverOpen = () => {
+    clearTimeout(hoverOpenTimer.current);
+    hoverOpenTimer.current = null;
+  };
+  const closeHoverOverlay = () => {
+    cancelHoverOpen();
+    setAdminExpandedSlot(null);
+    // Short cooldown to prevent immediate re-open while cursor still over slot
+    setSuppressHover(true);
+    setTimeout(() => setSuppressHover(false), 350);
+  };
+  const formatDateTime = (iso) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('en-IN', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return iso; }
+  };
+
+  const handleAdminUpdateStatus = async (id, status) => {
+    try {
+      await updateAppointmentStatus(id, { status });
+      // Refresh slots and admin detail maps
+      await fetchSlots();
+      const [apptRes, blockedRes] = await Promise.all([
+        getAllAppointments({ date: selectedDate }),
+        getBlockedSlots(selectedDate)
+      ]);
+      const map = {};
+      (apptRes.data.appointments || []).forEach(a => { map[a.timeSlot] = a; });
+      setAdminAppointmentsByTime(map);
+      const bmap = {};
+      (blockedRes.data.slots || []).forEach(b => { bmap[b.timeSlot] = b; });
+      setAdminBlockedByTime(bmap);
+      setAdminExpandedSlot(null);
+      alert(`${t('appointments.status')}: ${t(`appointments.${status}`)}. ${t('admin.sendSms')}`);
+    } catch (err) {
+      console.error('Update status failed', err);
+      alert(t('errors.serverError'));
+    }
+  };
 
   const fetchSlots = useCallback(async () => {
     try {
@@ -29,6 +86,40 @@ const Home = () => {
     }
   }, [selectedDate, fetchSlots]);
 
+  // Fetch admin-specific data for details when admin is viewing
+  useEffect(() => {
+    const fetchAdminData = async () => {
+      if (!(user && user.isAdmin)) return;
+      try {
+        const [apptRes, blockedRes] = await Promise.all([
+          getAllAppointments({ date: selectedDate }),
+          getBlockedSlots(selectedDate)
+        ]);
+        const map = {};
+        (apptRes.data.appointments || []).forEach(a => { map[a.timeSlot] = a; });
+        setAdminAppointmentsByTime(map);
+        const bmap = {};
+        (blockedRes.data.slots || []).forEach(b => { bmap[b.timeSlot] = b; });
+        setAdminBlockedByTime(bmap);
+      } catch (err) {
+        console.error('Failed to fetch admin slot details');
+      }
+    };
+    fetchAdminData();
+  }, [user, user?.isAdmin, selectedDate]);
+
+  // Close modal on Escape key for fast dismiss
+  useEffect(() => {
+    if (!adminExpandedSlot) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setAdminExpandedSlot(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [adminExpandedSlot]);
+
   const getMaxDate = () => {
     const maxDate = new Date();
     maxDate.setDate(maxDate.getDate() + 7);
@@ -40,6 +131,12 @@ const Home = () => {
     
     if (slot.isBooked || isLunch) {
       // Do nothing if slot is booked or lunch time
+      return;
+    }
+
+    // Admins cannot book from UI
+    if (user && user.isAdmin) {
+      // Admin: no clicking, details shown on hover only
       return;
     }
 
@@ -63,6 +160,22 @@ const Home = () => {
 
   const selectedDateObj = new Date(selectedDate + 'T00:00:00');
   const isSunday = selectedDateObj.getDay() === 0;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const parseSlotStart = (slotStr, baseDateStr) => {
+    try {
+      const startPart = slotStr.split('-')[0].trim();
+      const parts = startPart.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+      if (!parts) return null;
+      let hour = parseInt(parts[1], 10);
+      const minute = parseInt(parts[2], 10);
+      const ampm = parts[3].toUpperCase();
+      if (ampm === 'PM' && hour !== 12) hour += 12;
+      if (ampm === 'AM' && hour === 12) hour = 0;
+      const d = new Date(baseDateStr + 'T00:00:00');
+      d.setHours(hour, minute, 0, 0);
+      return d;
+    } catch { return null; }
+  };
 
   return (
     <>
@@ -73,10 +186,10 @@ const Home = () => {
         <>
           <div className="hero-section">
             <div className="hero-content">
-              <h1>Expert Physiotherapy Care</h1>
-              <p>Specialized treatment for back pain, neck pain, knee pain, shoulder pain, and sports injuries. Book your appointment today!</p>
+              <h1>{t('home.heroTitle')}</h1>
+              <p>{t('home.heroDescription')}</p>
               <button onClick={() => navigate('/register')} className="btn-hero">
-                Book Appointment Now
+                {t('home.bookNow')}
               </button>
             </div>
           </div>
@@ -84,7 +197,7 @@ const Home = () => {
           {/* Pain Types Section */}
           <div className="pain-types-section">
             <div className="pain-types-content">
-              <h2>Physiotherapy Treatments For</h2>
+              <h2>{t('home.treatments')}</h2>
               <div className="pain-types-grid">
                 {painTypes.map((pain, index) => (
                   <div 
@@ -93,7 +206,7 @@ const Home = () => {
                   >
                     <div className="pain-icon">{pain.icon}</div>
                     <h3>{pain.name}</h3>
-                    <p>Specialized treatment and rehabilitation programs tailored to your needs</p>
+                    <p>{t('home.specializedTreatment')}</p>
                   </div>
                 ))}
               </div>
@@ -112,7 +225,7 @@ const Home = () => {
               <line x1="8" y1="2" x2="8" y2="6" />
               <line x1="3" y1="10" x2="21" y2="10" />
             </svg>
-            {user ? 'Book Your Appointment' : 'View Available Slots'}
+            {user ? (user.isAdmin ? (t('admin.slots') || 'Slots') : t('booking.title')) : t('home.viewSlots')}
           </h2>
 
           <div className="date-selector">
@@ -145,7 +258,7 @@ const Home = () => {
 
           {!loading && isSunday && (
             <div className="closed-message">
-              Clinic is closed on Sundays
+              {t('booking.closedSunday')}
             </div>
           )}
 
@@ -154,15 +267,25 @@ const Home = () => {
               <div className="slots-grid">
                 {slots.map((slot, index) => {
                   const isLunch = slot.time.includes('01:00 PM');
+                  const slotStart = parseSlotStart(slot.time, selectedDate);
+                  const isClosed = selectedDate === todayStr && slotStart && (new Date() > slotStart);
                   return (
                     <div 
                       key={index}
                       className={`slot-card ${
-                        isLunch ? 'lunch' : slot.isBooked ? 'booked' : 'available'
+                        isLunch ? 'lunch' : (isClosed ? 'booked' : (slot.isBooked ? 'booked' : 'available'))
                       }`}
                       onClick={() => handleSlotClick(slot)}
+                      onMouseEnter={() => {
+                        if (user && user.isAdmin && !isLunch) startHoverOpen(slot.time);
+                      }}
+                      onMouseLeave={() => {
+                        if (user && user.isAdmin) {
+                          cancelHoverOpen();
+                        }
+                      }}
                       style={{ 
-                        cursor: (!slot.isBooked && !isLunch) ? 'pointer' : 'not-allowed' 
+                        cursor: (!isLunch && (user && user.isAdmin ? 'default' : (!slot.isBooked && !isClosed ? 'pointer' : 'not-allowed'))) 
                       }}
                     >
                       <div className="slot-icon">
@@ -173,12 +296,75 @@ const Home = () => {
                       </div>
                       <div className="slot-time">{slot.time}</div>
                       <div className="slot-status">
-                        {isLunch ? 'Lunch Break' : slot.isBooked ? '🔴 BOOKED' : '✅ AVAILABLE'}
+                        {isLunch 
+                          ? t('booking.lunchBreak') 
+                          : isClosed 
+                            ? ('⛔ ' + (t('booking.bookingClosed') || 'Booking Closed'))
+                            : slot.isBooked 
+                              ? ('🔴 ' + t('booking.booked')) 
+                              : ('✅ ' + t('booking.available'))}
                       </div>
+                      {/* Popover removed in favor of full-screen modal */}
                     </div>
                   );
                 })}
               </div>
+
+              {/* Full-screen hover modal for admin */}
+              {(user && user.isAdmin && adminExpandedSlot) && (
+                <div className="screen-overlay" onClick={closeHoverOverlay}>
+                  <div className="hover-modal" onMouseLeave={closeHoverOverlay} onClick={(e) => e.stopPropagation()}>
+                    <div className="modal-header">
+                      <div className="modal-title">{t('admin.slots') || 'Slots'}</div>
+                      <button className="close-btn" aria-label="Close" onClick={closeHoverOverlay}>×</button>
+                    </div>
+                    {(() => {
+                      const appt = adminAppointmentsByTime[adminExpandedSlot];
+                      const blocked = adminBlockedByTime[adminExpandedSlot];
+                      if (appt) {
+                        return (
+                          <>
+                            <div className="modal-body">
+                              <div className="modal-row"><strong>{t('appointments.status')}:</strong> {t(`appointments.${appt.status}`)}</div>
+                              <div className="modal-row"><strong>{t('appointments.time')}:</strong> {adminExpandedSlot}</div>
+                              <div className="modal-row"><strong>{t('auth.name')}:</strong> {appt.user?.name}</div>
+                              <div className="modal-row"><strong>{t('auth.phone')}:</strong> {appt.user?.phone}</div>
+                              <div className="modal-row"><strong>{t('auth.email')}:</strong> {appt.user?.email || 'N/A'}</div>
+                              <div className="modal-row"><strong>{t('appointments.painType')}:</strong> {appt.painType || 'N/A'}</div>
+                              {appt.reason && (<div className="modal-row"><strong>{t('appointments.reason')}:</strong> {appt.reason}</div>)}
+                              <div className="modal-row"><strong>{t('appointments.date')}:</strong> {formatDateTime(appt.createdAt)}</div>
+                            </div>
+                            <div className="modal-actions">
+                              {appt.status === 'pending' && (
+                                <>
+                                  <button className="btn-verify" onClick={() => handleAdminUpdateStatus(appt._id, 'confirmed')}>{t('admin.verify')} & {t('admin.sendSms')}</button>
+                                  <button className="btn-admin-cancel" onClick={() => handleAdminUpdateStatus(appt._id, 'cancelled')}>{t('common.cancel')} & {t('admin.sendSms')}</button>
+                                </>
+                              )}
+                              {appt.status === 'confirmed' && (
+                                <button className="btn-admin-cancel" onClick={() => handleAdminUpdateStatus(appt._id, 'cancelled')}>{t('common.cancel')} & {t('admin.sendSms')}</button>
+                              )}
+                            </div>
+                          </>
+                        );
+                      } else if (blocked) {
+                        return (
+                          <div className="modal-body">
+                            <div className="modal-row"><strong>{t('booking.blocked') || 'Blocked'}:</strong> {blocked.reason || t('common.info')}</div>
+                            <div className="modal-row"><strong>{t('appointments.time')}:</strong> {adminExpandedSlot}</div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="modal-body">
+                          <div className="modal-row"><strong>{t('appointments.status')}:</strong> {t('booking.available')}</div>
+                          <div className="modal-row"><strong>{t('appointments.time')}:</strong> {adminExpandedSlot}</div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
 
               {!user && (
                 <div className="login-prompt">
@@ -243,6 +429,7 @@ const Home = () => {
                   </div>
                 </div>
               )}
+              {/* Admin info note removed; admin can click slots to view details without booking */}
             </>
           )}
         </div>
